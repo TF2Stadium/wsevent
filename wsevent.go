@@ -3,13 +3,18 @@
 package wsevent
 
 import (
+	"crypto/md5"
+	"fmt"
 	ws "github.com/gorilla/websocket"
 	"net/http"
 	"sync"
+	"time"
 )
 
 //Client
 type Client struct {
+	//Session ID
+	ID        string
 	conn      *ws.Conn
 	readLock  *sync.Mutex
 	writeLock *sync.Mutex
@@ -28,7 +33,11 @@ type Server struct {
 	mapLock *sync.Mutex
 
 	newClient chan *Client
-	once      *sync.Once
+}
+
+func genId(r *http.Request) string {
+	hash := fmt.Sprintf("%s%d", r.RemoteAddr, time.Now().UnixNano())
+	return fmt.Sprintf("%x", md5.Sum([]byte(hash)))
 }
 
 func (s *Server) NewClient(upgrader ws.Upgrader, w http.ResponseWriter, r *http.Request) (*Client, error) {
@@ -37,7 +46,7 @@ func (s *Server) NewClient(upgrader ws.Upgrader, w http.ResponseWriter, r *http.
 		return nil, err
 	}
 
-	client := &Client{conn, new(sync.Mutex), new(sync.Mutex)}
+	client := &Client{genId(r), conn, new(sync.Mutex), new(sync.Mutex)}
 	s.newClient <- client
 
 	return client, nil
@@ -59,7 +68,6 @@ func NewServer() *Server {
 		calls:     make(map[string](func([]byte, int) ([]byte, int))),
 		mapLock:   new(sync.Mutex),
 		newClient: make(chan *Client),
-		once:      new(sync.Once),
 	}
 
 	return s
@@ -68,7 +76,7 @@ func NewServer() *Server {
 //Add a client c to room r
 func (s *Server) AddClient(c *Client, r string) {
 	s.roomsLock.Lock()
-	s.roomsLock.Unlock()
+	defer s.roomsLock.Unlock()
 	s.rooms[r] = append(s.rooms[r], c)
 }
 
