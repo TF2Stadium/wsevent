@@ -27,7 +27,8 @@ type Server struct {
 	calls   map[string]func([]byte, int) ([]byte, int)
 	mapLock *sync.Mutex
 
-	eventListen chan *Client
+	newClient chan *Client
+	once      *sync.Once
 }
 
 func (s *Server) NewClient(upgrader ws.Upgrader, w http.ResponseWriter, r *http.Request) (*Client, error) {
@@ -37,8 +38,9 @@ func (s *Server) NewClient(upgrader ws.Upgrader, w http.ResponseWriter, r *http.
 	}
 
 	client := &Client{conn, new(sync.Mutex), new(sync.Mutex)}
-	s.eventListen <- client
+	s.newClient <- client
 
+	s.once.Do(func() { go s.listener() })
 	return client, nil
 }
 
@@ -53,11 +55,12 @@ func (c *Client) Emit(data []byte, messageType int) error {
 //Return a new server object
 func NewServer() *Server {
 	s := &Server{
-		rooms:       make(map[string]([]*Client)),
-		roomsLock:   new(sync.Mutex),
-		calls:       make(map[string](func([]byte, int) ([]byte, int))),
-		mapLock:     new(sync.Mutex),
-		eventListen: make(chan *Client),
+		rooms:     make(map[string]([]*Client)),
+		roomsLock: new(sync.Mutex),
+		calls:     make(map[string](func([]byte, int) ([]byte, int))),
+		mapLock:   new(sync.Mutex),
+		newClient: make(chan *Client),
+		once:      new(sync.Once),
 	}
 
 	return s
@@ -72,23 +75,21 @@ func (s *Server) AddClient(c *Client, r string) {
 
 //Sends all clients in room data with type messageType
 func (s *Server) Broadcast(room string, data []byte, messageType int) {
-	clients := len(s.rooms[room])
-	clientSent := make(chan bool, clients)
+	wg := new(sync.WaitGroup)
 
 	for _, client := range s.rooms[room] {
 		go func(c *Client) {
+			wg.Add(1)
+			defer wg.Done()
 			c.Emit(data, messageType)
-			clientSent <- true
 		}(client)
 	}
 
-	for done := 0; done != clients; done++ {
-		<-clientSent
-	}
+	wg.Wait()
 }
 
-func (s *Server) Listener() {
-	c := <-s.eventListen
+func (s *Server) listener() {
+	c := <-s.newClient
 	go func(c *Client) {
 		for {
 			messageType, data, err := c.conn.ReadMessage()
