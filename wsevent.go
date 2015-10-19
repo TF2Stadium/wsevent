@@ -4,6 +4,7 @@ package wsevent
 
 import (
 	ws "github.com/gorilla/websocket"
+	"net/http"
 	"sync"
 )
 
@@ -16,7 +17,8 @@ type Client struct {
 
 //Server
 type Server struct {
-	rooms map[string]([]*Client)
+	rooms     map[string]([]*Client)
+	roomsLock *sync.Mutex
 
 	//The extractor function reads the byte array and the message type
 	//and returns the event represented by the message.
@@ -24,11 +26,20 @@ type Server struct {
 
 	calls   map[string]func([]byte, int) ([]byte, int)
 	mapLock *sync.Mutex
+
+	eventListen chan *Client
 }
 
-//Creates a new client from a websocket connection
-func NewClient(c *ws.Conn) *Client {
-	return &Client{c, new(sync.Mutex), new(sync.Mutex)}
+func (s *Server) NewClient(upgrader ws.Upgrader, w http.ResponseWriter, r *http.Request) (*Client, error) {
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	client := &Client{conn, new(sync.Mutex), new(sync.Mutex)}
+	s.eventListen <- client
+
+	return client, nil
 }
 
 //A thread-safe variant of WriteMessage
@@ -41,15 +52,21 @@ func (c *Client) Emit(data []byte, messageType int) error {
 
 //Return a new server object
 func NewServer() *Server {
-	return &Server{
-		rooms:   make(map[string]([]*Client)),
-		calls:   make(map[string](func([]byte, int) ([]byte, int))),
-		mapLock: new(sync.Mutex),
+	s := &Server{
+		rooms:       make(map[string]([]*Client)),
+		roomsLock:   new(sync.Mutex),
+		calls:       make(map[string](func([]byte, int) ([]byte, int))),
+		mapLock:     new(sync.Mutex),
+		eventListen: make(chan *Client),
 	}
+
+	return s
 }
 
 //Add a client c to room r
 func (s *Server) AddClient(c *Client, r string) {
+	s.roomsLock.Lock()
+	s.roomsLock.Unlock()
 	s.rooms[r] = append(s.rooms[r], c)
 }
 
@@ -70,29 +87,28 @@ func (s *Server) Broadcast(room string, data []byte, messageType int) {
 	}
 }
 
-//Starts listening for events on the client sockets, and calls the registered
-//event handlers. Needs to be executed once only.
-func (s *Server) StartListener() {
-	for _, room := range s.rooms {
-		for _, client := range room {
-			go func(c *Client) {
-				for {
-					messageType, data, err := c.conn.ReadMessage()
-					if err != nil {
-						continue
-					}
+func (s *Server) Listener() {
+	c := <-s.eventListen
+	go func(c *Client) {
+		for {
+			messageType, data, err := c.conn.ReadMessage()
+			if err != nil {
+				return
+			}
 
-					callName := s.Extractor(data, messageType)
+			callName := s.Extractor(data, messageType)
 
-					s.mapLock.Lock()
-					f := s.calls[callName]
-					s.mapLock.Unlock()
+			s.mapLock.Lock()
+			f, ok := s.calls[callName]
+			s.mapLock.Unlock()
 
-					c.Emit(f(data, messageType))
-				}
-			}(client)
+			if !ok {
+				continue
+			}
+			c.Emit(f(data, messageType))
 		}
-	}
+	}(c)
+
 }
 
 //Registers a callback for the event string. The callback must take two arguments,
