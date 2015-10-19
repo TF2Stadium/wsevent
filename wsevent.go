@@ -40,7 +40,6 @@ func (s *Server) NewClient(upgrader ws.Upgrader, w http.ResponseWriter, r *http.
 	client := &Client{conn, new(sync.Mutex), new(sync.Mutex)}
 	s.newClient <- client
 
-	s.once.Do(func() { go s.listener() })
 	return client, nil
 }
 
@@ -88,7 +87,7 @@ func (s *Server) Broadcast(room string, data []byte, messageType int) {
 	wg.Wait()
 }
 
-func (s *Server) listener() {
+func (s *Server) Listener() {
 	c := <-s.newClient
 	go func(c *Client) {
 		for {
