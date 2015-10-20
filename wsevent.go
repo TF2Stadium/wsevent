@@ -1,3 +1,7 @@
+//Copyright 2015 Vibhav Pant. All rights reserved.
+//Use of this source code is governed by the MIT
+//that can be found in the LICENSE file.
+
 //Package wsevent implements thread-safe event-driven communication similar to socket.IO,
 //on the top of Gorilla's WebSocket implementation.
 package wsevent
