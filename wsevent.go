@@ -7,7 +7,7 @@
 package wsevent
 
 import (
-	"crypto/md5"
+	"crypto/sha1"
 	"fmt"
 	"net/http"
 	"sync"
@@ -49,7 +49,7 @@ type Server struct {
 
 func genID(r *http.Request) string {
 	hash := fmt.Sprintf("%s%d", r.RemoteAddr, time.Now().UnixNano())
-	return fmt.Sprintf("%x", md5.Sum([]byte(hash)))
+	return fmt.Sprintf("%x", sha1.Sum([]byte(hash)))
 }
 
 //Returns the client's unique session ID
