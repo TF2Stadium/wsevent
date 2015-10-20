@@ -14,10 +14,14 @@ import (
 //Client
 type Client struct {
 	//Session ID
-	ID        string
+	ID string
+	//Rooms the client has been added to
+	rooms []string
+
 	conn      *ws.Conn
 	readLock  *sync.Mutex
 	writeLock *sync.Mutex
+	arrLock   *sync.Mutex
 }
 
 //Server
@@ -28,6 +32,9 @@ type Server struct {
 	//The extractor function reads the byte array and the message type
 	//and returns the event represented by the message.
 	Extractor func([]byte, int) string
+	//Called when the websocket connection is called. The only argument is
+	//the disconnected client's session ID
+	OnDisconnect func(string)
 
 	calls   map[string]func([]byte, int) ([]byte, int)
 	mapLock *sync.Mutex
@@ -46,7 +53,14 @@ func (s *Server) NewClient(upgrader ws.Upgrader, w http.ResponseWriter, r *http.
 		return nil, err
 	}
 
-	client := &Client{genId(r), conn, new(sync.Mutex), new(sync.Mutex)}
+	var arr []string
+	client := &Client{
+		ID:        genId(r),
+		rooms:     arr,
+		conn:      conn,
+		readLock:  new(sync.Mutex),
+		writeLock: new(sync.Mutex),
+		arrLock:   new(sync.Mutex)}
 	s.newClient <- client
 
 	return client, nil
@@ -78,6 +92,10 @@ func (s *Server) AddClient(c *Client, r string) {
 	s.roomsLock.Lock()
 	defer s.roomsLock.Unlock()
 	s.rooms[r] = append(s.rooms[r], c)
+
+	c.arrLock.Lock()
+	defer c.arrLock.Lock()
+	c.rooms = append(c.rooms, r)
 }
 
 //Sends all clients in room data with type messageType
@@ -95,28 +113,41 @@ func (s *Server) Broadcast(room string, data []byte, messageType int) {
 	wg.Wait()
 }
 
+func (c *Client) cleanup(s *Server) {
+	c.conn.Close()
+	for _, room := range c.rooms {
+		delete(s.rooms, room)
+	}
+
+	if s.OnDisconnect != nil {
+		s.OnDisconnect(c.ID)
+	}
+}
+
 func (s *Server) Listener() {
-	c := <-s.newClient
-	go func(c *Client) {
-		for {
-			messageType, data, err := c.conn.ReadMessage()
-			if err != nil {
-				return
+	for {
+		c := <-s.newClient
+		go func(c *Client) {
+			for {
+				messageType, data, err := c.conn.ReadMessage()
+				if err != nil {
+					c.cleanup(s)
+					return
+				}
+
+				callName := s.Extractor(data, messageType)
+
+				s.mapLock.Lock()
+				f, ok := s.calls[callName]
+				s.mapLock.Unlock()
+
+				if !ok {
+					continue
+				}
+				c.Emit(f(data, messageType))
 			}
-
-			callName := s.Extractor(data, messageType)
-
-			s.mapLock.Lock()
-			f, ok := s.calls[callName]
-			s.mapLock.Unlock()
-
-			if !ok {
-				continue
-			}
-			c.Emit(f(data, messageType))
-		}
-	}(c)
-
+		}(c)
+	}
 }
 
 //Registers a callback for the event string. The callback must take two arguments,
