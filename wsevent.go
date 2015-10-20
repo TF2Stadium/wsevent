@@ -5,10 +5,11 @@ package wsevent
 import (
 	"crypto/md5"
 	"fmt"
-	ws "github.com/gorilla/websocket"
 	"net/http"
 	"sync"
 	"time"
+
+	ws "github.com/gorilla/websocket"
 )
 
 //Client
@@ -21,7 +22,7 @@ type Client struct {
 	conn      *ws.Conn
 	readLock  *sync.Mutex
 	writeLock *sync.Mutex
-	arrLock   *sync.Mutex
+	roomsLock *sync.Mutex
 }
 
 //Server
@@ -60,7 +61,7 @@ func (s *Server) NewClient(upgrader ws.Upgrader, w http.ResponseWriter, r *http.
 		conn:      conn,
 		readLock:  new(sync.Mutex),
 		writeLock: new(sync.Mutex),
-		arrLock:   new(sync.Mutex)}
+		roomsLock: new(sync.Mutex)}
 	s.newClient <- client
 
 	return client, nil
@@ -93,8 +94,8 @@ func (s *Server) AddClient(c *Client, r string) {
 	defer s.roomsLock.Unlock()
 	s.rooms[r] = append(s.rooms[r], c)
 
-	c.arrLock.Lock()
-	defer c.arrLock.Lock()
+	c.roomsLock.Lock()
+	defer c.roomsLock.Unlock()
 	c.rooms = append(c.rooms, r)
 }
 
@@ -115,8 +116,13 @@ func (s *Server) Broadcast(room string, data []byte, messageType int) {
 
 func (c *Client) cleanup(s *Server) {
 	c.conn.Close()
+	c.roomsLock.Lock()
+	defer c.roomsLock.Unlock()
+
 	for _, room := range c.rooms {
+		s.roomsLock.Lock()
 		delete(s.rooms, room)
+		s.roomsLock.Unlock()
 	}
 
 	if s.OnDisconnect != nil {
