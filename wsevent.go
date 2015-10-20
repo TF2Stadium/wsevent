@@ -1,4 +1,4 @@
-//wsevent implements thread-safe event-driven communication similar to socket.IO,
+//Package wsevent implements thread-safe event-driven communication similar to socket.IO,
 //on the top of Gorilla's WebSocket implementation.
 package wsevent
 
@@ -15,10 +15,7 @@ import (
 //Client
 type Client struct {
 	//Session ID
-	ID string
-	//Rooms the client has been added to
-	rooms     []string
-	roomsLock *sync.RWMutex
+	id string
 
 	conn     *ws.Conn
 	connLock *sync.RWMutex
@@ -28,6 +25,10 @@ type Client struct {
 type Server struct {
 	rooms     map[string]([]*Client)
 	roomsLock *sync.RWMutex
+
+	//maps client IDs tothe list of rooms the corresponding client has joined
+	joinedRooms     map[string][]string
+	joinedRoomsLock *sync.RWMutex
 
 	//The extractor function reads the byte array and the message type
 	//and returns the event represented by the message.
@@ -42,9 +43,14 @@ type Server struct {
 	newClient chan *Client
 }
 
-func genId(r *http.Request) string {
+func genID(r *http.Request) string {
 	hash := fmt.Sprintf("%s%d", r.RemoteAddr, time.Now().UnixNano())
 	return fmt.Sprintf("%x", md5.Sum([]byte(hash)))
+}
+
+//Returns the client's unique session ID
+func (c *Client) Id() string {
+	return c.id
 }
 
 func (s *Server) NewClient(upgrader ws.Upgrader, w http.ResponseWriter, r *http.Request) (*Client, error) {
@@ -53,13 +59,11 @@ func (s *Server) NewClient(upgrader ws.Upgrader, w http.ResponseWriter, r *http.
 		return nil, err
 	}
 
-	var arr []string
 	client := &Client{
-		ID:        genId(r),
-		rooms:     arr,
-		conn:      conn,
-		connLock:  new(sync.RWMutex),
-		roomsLock: new(sync.RWMutex)}
+		id:       genID(r),
+		conn:     conn,
+		connLock: new(sync.RWMutex),
+	}
 	s.newClient <- client
 
 	return client, nil
@@ -76,11 +80,16 @@ func (c *Client) Emit(data []byte, messageType int) error {
 //Return a new server object
 func NewServer() *Server {
 	s := &Server{
-		rooms:        make(map[string]([]*Client)),
-		roomsLock:    new(sync.RWMutex),
+		rooms:     make(map[string]([]*Client)),
+		roomsLock: new(sync.RWMutex),
+
+		joinedRooms:     make(map[string][]string),
+		joinedRoomsLock: new(sync.RWMutex),
+
 		handlers:     make(map[string](func([]byte, int) ([]byte, int))),
 		handlersLock: new(sync.RWMutex),
-		newClient:    make(chan *Client),
+
+		newClient: make(chan *Client),
 	}
 
 	return s
@@ -92,9 +101,9 @@ func (s *Server) AddClient(c *Client, r string) {
 	defer s.roomsLock.Unlock()
 	s.rooms[r] = append(s.rooms[r], c)
 
-	c.roomsLock.Lock()
-	defer c.roomsLock.Unlock()
-	c.rooms = append(c.rooms, r)
+	s.joinedRoomsLock.Lock()
+	defer s.joinedRoomsLock.Unlock()
+	s.joinedRooms[c.id] = append(s.joinedRooms[c.id], r)
 }
 
 //Sends all clients in room data with type messageType
@@ -114,20 +123,21 @@ func (s *Server) Broadcast(room string, data []byte, messageType int) {
 
 func (c *Client) cleanup(s *Server) {
 	c.conn.Close()
-	c.roomsLock.RLock()
-	defer c.roomsLock.RUnlock()
+	s.joinedRoomsLock.RLock()
+	defer s.joinedRoomsLock.RUnlock()
 
-	for _, room := range c.rooms {
+	for _, room := range s.joinedRooms[c.id] {
 		s.roomsLock.Lock()
 		delete(s.rooms, room)
 		s.roomsLock.Unlock()
 	}
 
 	if s.OnDisconnect != nil {
-		s.OnDisconnect(c.ID)
+		s.OnDisconnect(c.id)
 	}
 }
 
+//Starts listening for events on added sockets. Needs to be called only once.
 func (s *Server) Listener() {
 	for {
 		c := <-s.newClient
