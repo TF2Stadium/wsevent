@@ -33,11 +33,11 @@ type Server struct {
 	//The extractor function reads the byte array and the message type
 	//and returns the event represented by the message.
 	Extractor func([]byte, int) string
-	//Called when the websocket connection is called. The only argument is
-	//the disconnected client's session ID
+	//Called when the websocket connection closes. The disconnected client's
+	//session ID is sent as an argument
 	OnDisconnect func(string)
 
-	handlers     map[string]func([]byte, int) ([]byte, int)
+	handlers     map[string]func(*Client, []byte, int) ([]byte, int)
 	handlersLock *sync.RWMutex
 
 	newClient chan *Client
@@ -86,7 +86,7 @@ func NewServer() *Server {
 		joinedRooms:     make(map[string][]string),
 		joinedRoomsLock: new(sync.RWMutex),
 
-		handlers:     make(map[string](func([]byte, int) ([]byte, int))),
+		handlers:     make(map[string](func(*Client, []byte, int) ([]byte, int))),
 		handlersLock: new(sync.RWMutex),
 
 		newClient: make(chan *Client),
@@ -106,7 +106,7 @@ func (s *Server) AddClient(c *Client, r string) {
 	s.joinedRooms[c.id] = append(s.joinedRooms[c.id], r)
 }
 
-//Sends all clients in room data with type messageType
+//Send all clients in room room data with type messageType
 func (s *Server) Broadcast(room string, data []byte, messageType int) {
 	wg := new(sync.WaitGroup)
 
@@ -137,6 +137,19 @@ func (c *Client) cleanup(s *Server) {
 	}
 }
 
+//Returns an array of rooms the client c has been added to
+func (s *Server) RoomsJoined(c *Client) []string {
+	var rooms []string
+	s.joinedRoomsLock.RLock()
+	defer s.joinedRoomsLock.RUnlock()
+
+	for _, room := range s.joinedRooms[c.id] {
+		rooms = append(rooms, room)
+	}
+
+	return rooms
+}
+
 //Starts listening for events on added sockets. Needs to be called only once.
 func (s *Server) Listener() {
 	for {
@@ -158,15 +171,16 @@ func (s *Server) Listener() {
 				if !ok {
 					continue
 				}
-				c.Emit(f(data, messageType))
+				c.Emit(f(c, data, messageType))
 			}
 		}(c)
 	}
 }
 
-//Registers a callback for the event string. The callback must take two arguments,
-//a byte array it's type, and return a byte array and it's type.
-func (s *Server) On(event string, f func([]byte, int) ([]byte, int)) {
+//Registers a callback for the event string. The callback must take three arguments,
+//The cline object from which the message wwas received, byte array it's type,
+//and return a byte array and it's type.
+func (s *Server) On(event string, f func(*Client, []byte, int) ([]byte, int)) {
 	s.handlersLock.Lock()
 	s.handlers[event] = f
 	s.handlersLock.Unlock()
