@@ -9,6 +9,7 @@ package main
 import (
 	"flag"
 	"log"
+	"math/rand"
 	"net/url"
 
 	ws "github.com/gorilla/websocket"
@@ -22,9 +23,10 @@ func main() {
 	if err != nil {
 		log.Fatal("dial", err)
 	}
+	rand.Seed(time.Now().Unix())
 	go func() {
 		var resp struct {
-			Success bool
+			Result uint64
 		}
 		defer c.Close()
 		for {
@@ -33,18 +35,19 @@ func main() {
 				log.Println("read:", err)
 				break
 			}
-			log.Printf("success: %t", resp.Success)
+			log.Printf("success: %d", resp.Result)
 		}
 	}()
 
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	for t := range ticker.C {
+	for _ = range ticker.C {
 		data := struct {
 			Event string
-			Str   string
-		}{"print", t.String()}
+			Num1  int
+			Num2  int
+		}{"add", rand.Int(), rand.Int()}
 
 		err := c.WriteJSON(data)
 		if err != nil {

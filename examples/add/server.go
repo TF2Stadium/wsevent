@@ -30,22 +30,27 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 }
 
-func getEvent(data []byte, _ int) string {
+func getEvent(data string) string {
 	var js struct {
 		Event string
 	}
-	json.Unmarshal(data, &js)
+	json.Unmarshal([]byte(data), &js)
 	return js.Event
 }
 
 func setHandlers() {
-	server.On("print", func(c *wsevent.Client, data []byte, _ int) ([]byte, int) {
+	server.On("add", func(c *wsevent.Client, data string) string {
 		var args struct {
-			Str interface{}
+			Num1 int
+			Num2 int
 		}
-		json.Unmarshal(data, &args)
-		log.Printf("From %s: %v", c.Id(), args.Str)
-		return []byte(`{"success": true}`), ws.TextMessage
+		json.Unmarshal([]byte(data), &args)
+		log.Printf("From %s: %d + %d = %d", c.Id(), args.Num1, args.Num2, uint64(args.Num1+args.Num2))
+		resp := struct {
+			Result uint64
+		}{uint64(args.Num1 + args.Num2)}
+		b, _ := json.Marshal(resp)
+		return string(b)
 	})
 }
 
