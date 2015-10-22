@@ -8,6 +8,7 @@ package wsevent
 
 import (
 	"crypto/sha1"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
@@ -36,12 +37,12 @@ type Server struct {
 
 	//The extractor function reads the byte array and the message type
 	//and returns the event represented by the message.
-	Extractor func([]byte, int) string
+	Extractor func(string) string
 	//Called when the websocket connection closes. The disconnected client's
 	//session ID is sent as an argument
 	OnDisconnect func(string)
 
-	handlers     map[string]func(*Client, []byte, int) ([]byte, int)
+	handlers     map[string]func(*Client, string) string
 	handlersLock *sync.RWMutex
 
 	newClient chan *Client
@@ -90,7 +91,7 @@ func NewServer() *Server {
 		joinedRooms:     make(map[string][]string),
 		joinedRoomsLock: new(sync.RWMutex),
 
-		handlers:     make(map[string](func(*Client, []byte, int) ([]byte, int))),
+		handlers:     make(map[string](func(*Client, string) string)),
 		handlersLock: new(sync.RWMutex),
 
 		newClient: make(chan *Client),
@@ -160,13 +161,24 @@ func (s *Server) Listener() {
 		c := <-s.newClient
 		go func(c *Client) {
 			for {
-				messageType, data, err := c.conn.ReadMessage()
+				mtype, data, err := c.conn.ReadMessage()
 				if err != nil {
 					c.cleanup(s)
 					return
 				}
 
-				callName := s.Extractor(data, messageType)
+				var js struct {
+					Id   string
+					Data string
+				}
+
+				err = json.Unmarshal(data, &js)
+
+				if err != nil || mtype != ws.TextMessage {
+					continue
+				}
+
+				callName := s.Extractor(js.Data)
 
 				s.handlersLock.RLock()
 				f, ok := s.handlers[callName]
@@ -175,7 +187,15 @@ func (s *Server) Listener() {
 				if !ok {
 					continue
 				}
-				c.Emit(f(c, data, messageType))
+
+				rtrn := f(c, js.Data)
+				reply := struct {
+					Id   string `json:"id"`
+					Data string `json:"data,string"`
+				}{js.Id, rtrn}
+
+				bytes, _ := json.Marshal(reply)
+				c.Emit(bytes, ws.TextMessage)
 			}
 		}(c)
 	}
@@ -184,7 +204,7 @@ func (s *Server) Listener() {
 //Registers a callback for the event string. The callback must take three arguments,
 //The cline object from which the message wwas received, byte array it's type,
 //and return a byte array and it's type.
-func (s *Server) On(event string, f func(*Client, []byte, int) ([]byte, int)) {
+func (s *Server) On(event string, f func(*Client, string) string) {
 	s.handlersLock.Lock()
 	s.handlers[event] = f
 	s.handlersLock.Unlock()
