@@ -15,6 +15,7 @@ import (
 	"time"
 
 	ws "github.com/gorilla/websocket"
+	"log"
 )
 
 //Client
@@ -169,15 +170,16 @@ func (s *Server) Listener() {
 
 				var js struct {
 					Id   string
-					Data string
+					Data json.RawMessage
 				}
 				err = json.Unmarshal(data, &js)
 
 				if err != nil || mtype != ws.TextMessage {
+					log.Println(err)
 					continue
 				}
 
-				callName := s.Extractor(js.Data)
+				callName := s.Extractor(string(js.Data))
 
 				s.handlersLock.RLock()
 				f, ok := s.handlers[callName]
@@ -187,7 +189,7 @@ func (s *Server) Listener() {
 					continue
 				}
 
-				rtrn := f(c, js.Data)
+				rtrn := f(c, string(js.Data))
 				reply := struct {
 					Id   string `json:"id"`
 					Data string `json:"data,string"`
