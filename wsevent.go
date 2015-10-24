@@ -75,11 +75,11 @@ func (s *Server) NewClient(upgrader ws.Upgrader, w http.ResponseWriter, r *http.
 }
 
 //A thread-safe variant of WriteMessage
-func (c *Client) Emit(data []byte, messageType int) error {
+func (c *Client) Emit(data string) error {
 	c.connLock.Lock()
 	defer c.connLock.Unlock()
 
-	return c.conn.WriteMessage(messageType, data)
+	return c.conn.WriteMessage(ws.TextMessage, []byte(data))
 }
 
 //Return a new server object
@@ -112,14 +112,14 @@ func (s *Server) AddClient(c *Client, r string) {
 }
 
 //Send all clients in room room data with type messageType
-func (s *Server) Broadcast(room string, data []byte, messageType int) {
+func (s *Server) Broadcast(room string, data string) {
 	wg := new(sync.WaitGroup)
 
 	for _, client := range s.rooms[room] {
 		go func(c *Client) {
 			wg.Add(1)
 			defer wg.Done()
-			c.Emit(data, messageType)
+			c.Emit(data)
 		}(client)
 	}
 
@@ -171,7 +171,6 @@ func (s *Server) Listener() {
 					Id   string
 					Data string
 				}
-
 				err = json.Unmarshal(data, &js)
 
 				if err != nil || mtype != ws.TextMessage {
@@ -195,15 +194,14 @@ func (s *Server) Listener() {
 				}{js.Id, rtrn}
 
 				bytes, _ := json.Marshal(reply)
-				c.Emit(bytes, ws.TextMessage)
+				c.Emit(string(bytes))
 			}
 		}(c)
 	}
 }
 
-//Registers a callback for the event string. The callback must take three arguments,
-//The cline object from which the message wwas received, byte array it's type,
-//and return a byte array and it's type.
+//Registers a callback for the event string. The callback must take 2 arguments,
+//The client from which the message was received and the string message itself.
 func (s *Server) On(event string, f func(*Client, string) string) {
 	s.handlersLock.Lock()
 	s.handlers[event] = f
