@@ -12,7 +12,9 @@ import (
 	"math/rand"
 	"net/url"
 
+	"encoding/json"
 	ws "github.com/gorilla/websocket"
+	"strconv"
 	"time"
 )
 
@@ -42,16 +44,26 @@ func main() {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
+	var i int
 	for _ = range ticker.C {
+		type event struct {
+			Event string `json:"event"`
+			Num1  int    `json:"num1"`
+			Num2  int    `json:"num2"`
+		}
+
 		data := struct {
-			Event string
-			Num1  int
-			Num2  int
-		}{"add", rand.Int(), rand.Int()}
+			Id   string `json:"id"`
+			Data event  `json:"data"`
+		}{strconv.Itoa(i), event{"add", rand.Int(), rand.Int()}}
 
 		err := c.WriteJSON(data)
+
+		bytes, _ := json.Marshal(data)
+		log.Println(string(bytes))
 		if err != nil {
 			log.Fatal("write:", err)
 		}
+		i++
 	}
 }
