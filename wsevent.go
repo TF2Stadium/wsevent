@@ -25,6 +25,7 @@ type Client struct {
 
 	conn     *ws.Conn
 	connLock *sync.RWMutex
+	request  *http.Request
 }
 
 //Server
@@ -59,6 +60,11 @@ func (c *Client) Id() string {
 	return c.id
 }
 
+// Returns the first http request when established connection.
+func (c *Client) Request() *http.Request {
+	return c.request
+}
+
 func (s *Server) NewClient(upgrader ws.Upgrader, w http.ResponseWriter, r *http.Request) (*Client, error) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -69,6 +75,7 @@ func (s *Server) NewClient(upgrader ws.Upgrader, w http.ResponseWriter, r *http.
 		id:       genID(r),
 		conn:     conn,
 		connLock: new(sync.RWMutex),
+		request:  r,
 	}
 	s.newClient <- client
 
@@ -80,7 +87,24 @@ func (c *Client) Emit(data string) error {
 	c.connLock.Lock()
 	defer c.connLock.Unlock()
 
-	return c.conn.WriteMessage(ws.TextMessage, []byte(data))
+	js := struct {
+		Id   int             `json:"id"`
+		Data json.RawMessage `json:"data"`
+	}{-1, []byte(data)}
+	return c.conn.WriteJSON(js)
+}
+
+//A thread-safe variant of EmitJSON
+func (c *Client) EmitJSON(v interface{}) error {
+	c.connLock.Lock()
+	defer c.connLock.Unlock()
+
+	js := struct {
+		Id   int         `json:"id"`
+		Data interface{} `json:"data"`
+	}{-1, v}
+
+	return c.conn.WriteJSON(js)
 }
 
 //Return a new server object
@@ -110,6 +134,43 @@ func (s *Server) AddClient(c *Client, r string) {
 	s.joinedRoomsLock.Lock()
 	defer s.joinedRoomsLock.Unlock()
 	s.joinedRooms[c.id] = append(s.joinedRooms[c.id], r)
+}
+
+//Remove client c from room r
+func (s *Server) RemoveClient(c *Client, r string) {
+	index := -1
+	s.roomsLock.Lock()
+
+	for i, client := range s.rooms[r] {
+		if c == client {
+			index = i
+		}
+	}
+	if index == -1 {
+		return
+	}
+
+	s.rooms[r][index] = s.rooms[r][len(s.rooms[r])-1]
+	s.rooms[r][len(s.rooms[r])-1] = nil
+	s.rooms[r] = s.rooms[r][:len(s.rooms[r])-1]
+	s.roomsLock.Unlock()
+
+	s.joinedRoomsLock.Lock()
+	index = -1
+	for i, room := range s.joinedRooms[c.id] {
+		if room == r {
+			index = i
+		}
+	}
+	if index == -1 {
+		return
+	}
+
+	length := len(s.joinedRooms[c.id])
+	s.joinedRooms[c.id][index] = s.joinedRooms[c.id][length-1]
+	s.joinedRooms[c.id][length-1] = ""
+	s.joinedRooms[c.id] = s.joinedRooms[c.id][:length-1]
+	s.joinedRoomsLock.Unlock()
 }
 
 //Send all clients in room room data with type messageType
