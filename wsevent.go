@@ -10,12 +10,12 @@ import (
 	"crypto/sha1"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"sync"
 	"time"
 
 	ws "github.com/gorilla/websocket"
-	"log"
 )
 
 //Client
@@ -30,10 +30,11 @@ type Client struct {
 
 //Server
 type Server struct {
+	//maps room string to a list of clients in it
 	rooms     map[string]([]*Client)
 	roomsLock *sync.RWMutex
 
-	//maps client IDs tothe list of rooms the corresponding client has joined
+	//maps client IDs to the list of rooms the corresponding client has joined
 	joinedRooms     map[string][]string
 	joinedRoomsLock *sync.RWMutex
 
@@ -44,7 +45,7 @@ type Server struct {
 	//session ID is sent as an argument
 	OnDisconnect func(string)
 
-	handlers     map[string]func(*Client, string) string
+	handlers     map[string]func(*Server, *Client, string) string
 	handlersLock *sync.RWMutex
 
 	newClient chan *Client
@@ -86,12 +87,7 @@ func (s *Server) NewClient(upgrader ws.Upgrader, w http.ResponseWriter, r *http.
 func (c *Client) Emit(data string) error {
 	c.connLock.Lock()
 	defer c.connLock.Unlock()
-
-	js := struct {
-		Id   int             `json:"id"`
-		Data json.RawMessage `json:"data"`
-	}{-1, []byte(data)}
-	return c.conn.WriteJSON(js)
+	return c.conn.WriteMessage(ws.TextMessage, []byte(data))
 }
 
 //A thread-safe variant of EmitJSON
@@ -113,10 +109,11 @@ func NewServer() *Server {
 		rooms:     make(map[string]([]*Client)),
 		roomsLock: new(sync.RWMutex),
 
+		//Maps socket ID -> list of rooms the client is in
 		joinedRooms:     make(map[string][]string),
 		joinedRoomsLock: new(sync.RWMutex),
 
-		handlers:     make(map[string](func(*Client, string) string)),
+		handlers:     make(map[string](func(*Server, *Client, string) string)),
 		handlersLock: new(sync.RWMutex),
 
 		newClient: make(chan *Client),
@@ -137,12 +134,12 @@ func (s *Server) AddClient(c *Client, r string) {
 }
 
 //Remove client c from room r
-func (s *Server) RemoveClient(c *Client, r string) {
+func (s *Server) RemoveClient(id, r string) {
 	index := -1
 	s.roomsLock.Lock()
 
 	for i, client := range s.rooms[r] {
-		if c == client {
+		if id == client.id {
 			index = i
 		}
 	}
@@ -155,9 +152,19 @@ func (s *Server) RemoveClient(c *Client, r string) {
 	s.rooms[r] = s.rooms[r][:len(s.rooms[r])-1]
 	s.roomsLock.Unlock()
 
-	s.joinedRoomsLock.Lock()
 	index = -1
-	for i, room := range s.joinedRooms[c.id] {
+
+	s.joinedRoomsLock.RLock()
+	if _, exists := s.joinedRooms[id]; !exists {
+		s.joinedRoomsLock.RUnlock()
+		return
+	}
+	s.joinedRoomsLock.RUnlock()
+
+	s.joinedRoomsLock.Lock()
+	defer s.joinedRoomsLock.Unlock()
+
+	for i, room := range s.joinedRooms[id] {
 		if room == r {
 			index = i
 		}
@@ -166,11 +173,11 @@ func (s *Server) RemoveClient(c *Client, r string) {
 		return
 	}
 
-	length := len(s.joinedRooms[c.id])
-	s.joinedRooms[c.id][index] = s.joinedRooms[c.id][length-1]
-	s.joinedRooms[c.id][length-1] = ""
-	s.joinedRooms[c.id] = s.joinedRooms[c.id][:length-1]
-	s.joinedRoomsLock.Unlock()
+	length := len(s.joinedRooms[id])
+	s.joinedRooms[id][index] = s.joinedRooms[id][length-1]
+	s.joinedRooms[id][length-1] = ""
+	s.joinedRooms[id] = s.joinedRooms[id][:length-1]
+
 }
 
 //Send all clients in room room data with type messageType
@@ -188,15 +195,32 @@ func (s *Server) Broadcast(room string, data string) {
 	wg.Wait()
 }
 
+func (s *Server) BroadcastJSON(room string, v interface{}) {
+	wg := new(sync.WaitGroup)
+
+	for _, client := range s.rooms[room] {
+		wg.Add(1)
+		go func(c *Client) {
+			defer wg.Done()
+			c.EmitJSON(v)
+		}(client)
+	}
+
+	wg.Wait()
+
+}
+
 func (c *Client) cleanup(s *Server) {
 	c.conn.Close()
-	s.joinedRoomsLock.RLock()
-	defer s.joinedRoomsLock.RUnlock()
 
-	for _, room := range s.joinedRooms[c.id] {
-		s.roomsLock.Lock()
-		delete(s.rooms, room)
-		s.roomsLock.Unlock()
+	s.joinedRoomsLock.Lock()
+	delete(s.joinedRooms, c.id)
+	s.joinedRoomsLock.Unlock()
+
+	var rooms []string
+	copy(rooms, s.joinedRooms[c.id])
+	for _, room := range rooms {
+		s.RemoveClient(c.id, room)
 	}
 
 	if s.OnDisconnect != nil {
@@ -205,14 +229,12 @@ func (c *Client) cleanup(s *Server) {
 }
 
 //Returns an array of rooms the client c has been added to
-func (s *Server) RoomsJoined(c *Client) []string {
+func (s *Server) RoomsJoined(id string) []string {
 	var rooms []string
 	s.joinedRoomsLock.RLock()
 	defer s.joinedRoomsLock.RUnlock()
 
-	for _, room := range s.joinedRooms[c.id] {
-		rooms = append(rooms, room)
-	}
+	copy(rooms, s.joinedRooms[id])
 
 	return rooms
 }
@@ -250,7 +272,7 @@ func (s *Server) Listener() {
 					continue
 				}
 
-				rtrn := f(c, string(js.Data))
+				rtrn := f(s, c, string(js.Data))
 				reply := struct {
 					Id   string `json:"id"`
 					Data string `json:"data,string"`
@@ -265,7 +287,7 @@ func (s *Server) Listener() {
 
 //Registers a callback for the event string. The callback must take 2 arguments,
 //The client from which the message was received and the string message itself.
-func (s *Server) On(event string, f func(*Client, string) string) {
+func (s *Server) On(event string, f func(*Server, *Client, string) string) {
 	s.handlersLock.Lock()
 	s.handlers[event] = f
 	s.handlersLock.Unlock()
