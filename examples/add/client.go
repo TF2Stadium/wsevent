@@ -27,17 +27,14 @@ func main() {
 	}
 	rand.Seed(time.Now().Unix())
 	go func() {
-		var resp struct {
-			Result uint64
-		}
 		defer c.Close()
 		for {
-			err := c.ReadJSON(&resp)
+			_, bytes, err := c.ReadMessage()
 			if err != nil {
 				log.Println("read:", err)
 				break
 			}
-			log.Printf("success: %d", resp.Result)
+			log.Printf("%s", string(bytes))
 		}
 	}()
 

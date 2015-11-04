@@ -39,7 +39,7 @@ func getEvent(data string) string {
 }
 
 func setHandlers() {
-	server.On("add", func(c *wsevent.Client, data string) string {
+	server.On("add", func(_ *wsevent.Server, c *wsevent.Client, data string) string {
 		var args struct {
 			Num1 int
 			Num2 int
@@ -49,8 +49,8 @@ func setHandlers() {
 		resp := struct {
 			Result uint64
 		}{uint64(args.Num1 + args.Num2)}
-		b, _ := json.Marshal(resp)
-		return string(b)
+		bytes, _ := json.Marshal(resp)
+		return string(bytes)
 	})
 }
 
