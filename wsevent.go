@@ -124,6 +124,15 @@ func NewServer() *Server {
 
 //Add a client c to room r
 func (s *Server) AddClient(c *Client, r string) {
+	s.joinedRoomsLock.RLock()
+	for _, clientID := range s.joinedRooms[c.id] {
+		if clientID == c.id {
+			s.joinedRoomsLock.RUnlock()
+			return
+		}
+	}
+	s.joinedRoomsLock.RUnlock()
+
 	s.roomsLock.Lock()
 	defer s.roomsLock.Unlock()
 	s.rooms[r] = append(s.rooms[r], c)
@@ -212,13 +221,13 @@ func (s *Server) BroadcastJSON(room string, v interface{}) {
 
 func (c *Client) cleanup(s *Server) {
 	c.conn.Close()
+	var rooms []string
+	copy(rooms, s.joinedRooms[c.id])
 
 	s.joinedRoomsLock.Lock()
 	delete(s.joinedRooms, c.id)
 	s.joinedRoomsLock.Unlock()
 
-	var rooms []string
-	copy(rooms, s.joinedRooms[c.id])
 	for _, room := range rooms {
 		s.RemoveClient(c.id, room)
 	}
