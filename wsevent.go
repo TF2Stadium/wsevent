@@ -156,19 +156,10 @@ func (s *Server) RemoveClient(id, r string) {
 		return
 	}
 
-	s.rooms[r][index] = s.rooms[r][len(s.rooms[r])-1]
-	s.rooms[r][len(s.rooms[r])-1] = nil
-	s.rooms[r] = s.rooms[r][:len(s.rooms[r])-1]
+	s.rooms[r] = append(s.rooms[r][:index], s.rooms[r][index+1:]...)
 	s.roomsLock.Unlock()
 
 	index = -1
-
-	s.joinedRoomsLock.RLock()
-	if _, exists := s.joinedRooms[id]; !exists {
-		s.joinedRoomsLock.RUnlock()
-		return
-	}
-	s.joinedRoomsLock.RUnlock()
 
 	s.joinedRoomsLock.Lock()
 	defer s.joinedRoomsLock.Unlock()
@@ -182,11 +173,7 @@ func (s *Server) RemoveClient(id, r string) {
 		return
 	}
 
-	length := len(s.joinedRooms[id])
-	s.joinedRooms[id][index] = s.joinedRooms[id][length-1]
-	s.joinedRooms[id][length-1] = ""
-	s.joinedRooms[id] = s.joinedRooms[id][:length-1]
-
+	s.joinedRooms[id] = append(s.joinedRooms[id][:index], s.joinedRooms[id][index+1:]...)
 }
 
 //Send all clients in room room data with type messageType
@@ -194,6 +181,7 @@ func (s *Server) Broadcast(room string, data string) {
 	wg := new(sync.WaitGroup)
 
 	for _, client := range s.rooms[room] {
+		fmt.Printf("sending to %s in room %s\n", client.id, room)
 		go func(c *Client) {
 			wg.Add(1)
 			defer wg.Done()
@@ -208,6 +196,7 @@ func (s *Server) BroadcastJSON(room string, v interface{}) {
 	wg := new(sync.WaitGroup)
 
 	for _, client := range s.rooms[room] {
+		fmt.Printf("sending to %s %s\n", client.id, room)
 		wg.Add(1)
 		go func(c *Client) {
 			defer wg.Done()
@@ -221,16 +210,29 @@ func (s *Server) BroadcastJSON(room string, v interface{}) {
 
 func (c *Client) cleanup(s *Server) {
 	c.conn.Close()
-	var rooms []string
-	copy(rooms, s.joinedRooms[c.id])
+
+	s.roomsLock.Lock()
+	for _, room := range s.joinedRooms[c.id] {
+		log.Println(room)
+		index := -1
+
+		for i, client := range s.rooms[room] {
+			if client.id == c.id {
+				index = i
+			}
+		}
+		if index == -1 {
+			s.roomsLock.Unlock()
+			return
+		}
+
+		s.rooms[room] = append(s.rooms[room][:index], s.rooms[room][index+1:]...)
+	}
+	s.roomsLock.Unlock()
 
 	s.joinedRoomsLock.Lock()
 	delete(s.joinedRooms, c.id)
 	s.joinedRoomsLock.Unlock()
-
-	for _, room := range rooms {
-		s.RemoveClient(c.id, room)
-	}
 
 	if s.OnDisconnect != nil {
 		s.OnDisconnect(c.id)
