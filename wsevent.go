@@ -213,7 +213,7 @@ func (c *Client) cleanup(s *Server) {
 
 	s.roomsLock.Lock()
 	for _, room := range s.joinedRooms[c.id] {
-		log.Println(room)
+		//log.Println(room)
 		index := -1
 
 		for i, client := range s.rooms[room] {
