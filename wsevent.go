@@ -181,7 +181,7 @@ func (s *Server) Broadcast(room string, data string) {
 	wg := new(sync.WaitGroup)
 
 	for _, client := range s.rooms[room] {
-		fmt.Printf("sending to %s in room %s\n", client.id, room)
+		//log.Printf("sending to %s in room %s\n", client.id, room)
 		go func(c *Client) {
 			wg.Add(1)
 			defer wg.Done()
@@ -196,7 +196,7 @@ func (s *Server) BroadcastJSON(room string, v interface{}) {
 	wg := new(sync.WaitGroup)
 
 	for _, client := range s.rooms[room] {
-		fmt.Printf("sending to %s %s\n", client.id, room)
+		//log.Printf("sending to %s %s\n", client.id, room)
 		wg.Add(1)
 		go func(c *Client) {
 			defer wg.Done()
