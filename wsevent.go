@@ -1,4 +1,4 @@
-//Copyright 2015 Vibhav Pant. All rights reserved.
+//Copyright 2015 TF2Stadium. All rights reserved.
 //Use of this source code is governed by the MIT
 //that can be found in the LICENSE file.
 
@@ -127,6 +127,7 @@ func (s *Server) AddClient(c *Client, r string) {
 	s.joinedRoomsLock.RLock()
 	for _, clientID := range s.joinedRooms[c.id] {
 		if clientID == c.id {
+			//log.Printf("%s already in room %s", c.id, r)
 			s.joinedRoomsLock.RUnlock()
 			return
 		}
@@ -140,6 +141,7 @@ func (s *Server) AddClient(c *Client, r string) {
 	s.joinedRoomsLock.Lock()
 	defer s.joinedRoomsLock.Unlock()
 	s.joinedRooms[c.id] = append(s.joinedRooms[c.id], r)
+	//log.Printf("Added %s to room %s", c.id, r)
 }
 
 //Remove client c from room r
@@ -150,9 +152,11 @@ func (s *Server) RemoveClient(id, r string) {
 	for i, client := range s.rooms[r] {
 		if id == client.id {
 			index = i
+			break
 		}
 	}
 	if index == -1 {
+		//log.Printf("Client %s not found in room %s", id, r)
 		s.roomsLock.Unlock()
 		return
 	}
