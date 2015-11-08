@@ -153,6 +153,7 @@ func (s *Server) RemoveClient(id, r string) {
 		}
 	}
 	if index == -1 {
+		s.roomsLock.Unlock()
 		return
 	}
 
