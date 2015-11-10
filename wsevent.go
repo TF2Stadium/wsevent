@@ -83,6 +83,12 @@ func (s *Server) NewClient(upgrader ws.Upgrader, w http.ResponseWriter, r *http.
 	return client, nil
 }
 
+func (c *Client) Close() error {
+	c.connLock.Lock()
+	defer c.connLock.Unlock()
+	return c.conn.Close()
+}
+
 //A thread-safe variant of WriteMessage
 func (c *Client) Emit(data string) error {
 	c.connLock.Lock()
