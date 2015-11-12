@@ -131,8 +131,8 @@ func NewServer() *Server {
 //Add a client c to room r
 func (s *Server) AddClient(c *Client, r string) {
 	s.joinedRoomsLock.RLock()
-	for _, clientID := range s.joinedRooms[c.id] {
-		if clientID == c.id {
+	for _, room := range s.joinedRooms[c.id] {
+		if r == room {
 			//log.Printf("%s already in room %s", c.id, r)
 			s.joinedRoomsLock.RUnlock()
 			return
