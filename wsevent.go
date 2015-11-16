@@ -125,6 +125,7 @@ func NewServer() *Server {
 		newClient: make(chan *Client),
 	}
 
+	go s.listener()
 	return s
 }
 
@@ -261,10 +262,10 @@ func (s *Server) RoomsJoined(id string) []string {
 	return rooms
 }
 
-//Starts listening for events on added sockets. Needs to be called only once.
-func (s *Server) Listener() {
+func (s *Server) listener() {
 	for {
 		c := <-s.newClient
+
 		go func(c *Client) {
 			for {
 				mtype, data, err := c.conn.ReadMessage()
@@ -294,14 +295,16 @@ func (s *Server) Listener() {
 					continue
 				}
 
-				rtrn := f(s, c, string(js.Data))
-				reply := struct {
-					Id   string `json:"id"`
-					Data string `json:"data,string"`
-				}{js.Id, rtrn}
+				go func() {
+					rtrn := f(s, c, string(js.Data))
+					reply := struct {
+						Id   string `json:"id"`
+						Data string `json:"data,string"`
+					}{js.Id, rtrn}
 
-				bytes, _ := json.Marshal(reply)
-				c.Emit(string(bytes))
+					bytes, _ := json.Marshal(reply)
+					c.Emit(string(bytes))
+				}()
 			}
 		}(c)
 	}
