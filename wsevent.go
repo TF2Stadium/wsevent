@@ -190,34 +190,21 @@ func (s *Server) RemoveClient(id, r string) {
 
 //Send all clients in room room data with type messageType
 func (s *Server) Broadcast(room string, data string) {
-	wg := new(sync.WaitGroup)
-
 	for _, client := range s.rooms[room] {
 		//log.Printf("sending to %s in room %s\n", client.id, room)
 		go func(c *Client) {
-			wg.Add(1)
-			defer wg.Done()
 			c.Emit(data)
 		}(client)
 	}
-
-	wg.Wait()
 }
 
 func (s *Server) BroadcastJSON(room string, v interface{}) {
-	wg := new(sync.WaitGroup)
-
 	for _, client := range s.rooms[room] {
 		//log.Printf("sending to %s %s\n", client.id, room)
-		wg.Add(1)
 		go func(c *Client) {
-			defer wg.Done()
 			c.EmitJSON(v)
 		}(client)
 	}
-
-	wg.Wait()
-
 }
 
 func (c *Client) cleanup(s *Server) {
@@ -262,51 +249,57 @@ func (s *Server) RoomsJoined(id string) []string {
 	return rooms
 }
 
+func (c *Client) listener(s *Server) {
+	for {
+		mtype, data, err := c.conn.ReadMessage()
+		if err != nil {
+			c.cleanup(s)
+			return
+		}
+
+		var js struct {
+			Id   string
+			Data json.RawMessage
+		}
+		err = json.Unmarshal(data, &js)
+
+		if err != nil || mtype != ws.TextMessage {
+			log.Println(err)
+			continue
+		}
+
+		callName := s.Extractor(string(js.Data))
+
+		s.handlersLock.RLock()
+		f, ok := s.handlers[callName]
+		s.handlersLock.RUnlock()
+
+		if !ok {
+			continue
+		}
+
+		go func() {
+			rtrn := f(s, c, string(js.Data))
+			reply := struct {
+				Id   string `json:"id"`
+				Data string `json:"data,string"`
+			}{js.Id, rtrn}
+
+			bytes, _ := json.Marshal(reply)
+			c.Emit(string(bytes))
+		}()
+	}
+}
+
 func (s *Server) listener() {
 	for {
-		c := <-s.newClient
+		select {
+		case c := <-s.newClient:
+			go c.listener(s)
+		default:
+			log.Fatal("newClient channel closed")
+		}
 
-		go func(c *Client) {
-			for {
-				mtype, data, err := c.conn.ReadMessage()
-				if err != nil {
-					c.cleanup(s)
-					return
-				}
-
-				var js struct {
-					Id   string
-					Data json.RawMessage
-				}
-				err = json.Unmarshal(data, &js)
-
-				if err != nil || mtype != ws.TextMessage {
-					log.Println(err)
-					continue
-				}
-
-				callName := s.Extractor(string(js.Data))
-
-				s.handlersLock.RLock()
-				f, ok := s.handlers[callName]
-				s.handlersLock.RUnlock()
-
-				if !ok {
-					continue
-				}
-
-				go func() {
-					rtrn := f(s, c, string(js.Data))
-					reply := struct {
-						Id   string `json:"id"`
-						Data string `json:"data,string"`
-					}{js.Id, rtrn}
-
-					bytes, _ := json.Marshal(reply)
-					c.Emit(string(bytes))
-				}()
-			}
-		}(c)
 	}
 }
 
