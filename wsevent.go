@@ -297,7 +297,6 @@ func (s *Server) listener() {
 		case c := <-s.newClient:
 			go c.listener(s)
 		default:
-			log.Fatal("newClient channel closed")
 		}
 
 	}
