@@ -293,12 +293,8 @@ func (c *Client) listener(s *Server) {
 
 func (s *Server) listener() {
 	for {
-		select {
-		case c := <-s.newClient:
-			go c.listener(s)
-		default:
-		}
-
+		c := <-s.newClient
+		go c.listener(s)
 	}
 }
 
