@@ -45,7 +45,7 @@ type Server struct {
 	//session ID is sent as an argument
 	OnDisconnect func(string)
 
-	handlers     map[string]func(*Server, *Client, string) string
+	handlers     map[string]func(*Server, *Client, []byte) []byte
 	handlersLock *sync.RWMutex
 
 	newClient chan *Client
@@ -119,7 +119,7 @@ func NewServer() *Server {
 		joinedRooms:     make(map[string][]string),
 		joinedRoomsLock: new(sync.RWMutex),
 
-		handlers:     make(map[string](func(*Server, *Client, string) string)),
+		handlers:     make(map[string](func(*Server, *Client, []byte) []byte)),
 		handlersLock: new(sync.RWMutex),
 
 		newClient: make(chan *Client),
@@ -279,11 +279,11 @@ func (c *Client) listener(s *Server) {
 		}
 
 		go func() {
-			rtrn := f(s, c, string(js.Data))
+			rtrn := f(s, c, js.Data)
 			reply := struct {
 				Id   string `json:"id"`
 				Data string `json:"data,string"`
-			}{js.Id, rtrn}
+			}{js.Id, string(rtrn)}
 
 			bytes, _ := json.Marshal(reply)
 			c.Emit(string(bytes))
@@ -300,7 +300,7 @@ func (s *Server) listener() {
 
 //Registers a callback for the event string. The callback must take 2 arguments,
 //The client from which the message was received and the string message itself.
-func (s *Server) On(event string, f func(*Server, *Client, string) string) {
+func (s *Server) On(event string, f func(*Server, *Client, []byte) []byte) {
 	s.handlersLock.Lock()
 	s.handlers[event] = f
 	s.handlersLock.Unlock()
