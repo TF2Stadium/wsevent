@@ -44,6 +44,8 @@ type Server struct {
 	//Called when the websocket connection closes. The disconnected client's
 	//session ID is sent as an argument
 	OnDisconnect func(string)
+	//Called when no event handler for a specific event exists
+	DefaultHandler func(*Server, *Client, []byte) []byte
 
 	handlers     map[string]func(*Server, *Client, []byte) []byte
 	handlersLock *sync.RWMutex
@@ -275,9 +277,13 @@ func (c *Client) listener(s *Server) {
 		s.handlersLock.RUnlock()
 
 		if !ok {
+			if s.DefaultHandler != nil {
+				f = s.DefaultHandler
+				goto call
+			}
 			continue
 		}
-
+	call:
 		go func() {
 			rtrn := f(s, c, js.Data)
 			reply := struct {
