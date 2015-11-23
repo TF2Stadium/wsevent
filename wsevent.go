@@ -7,13 +7,12 @@
 package wsevent
 
 import (
-	"crypto/sha1"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"sync"
-	"time"
 
 	ws "github.com/gorilla/websocket"
 )
@@ -53,9 +52,11 @@ type Server struct {
 	newClient chan *Client
 }
 
-func genID(r *http.Request) string {
-	hash := fmt.Sprintf("%s%d", r.RemoteAddr, time.Now().UnixNano())
-	return fmt.Sprintf("%x", sha1.Sum([]byte(hash)))
+func genID() string {
+	bytes := make([]byte, 32)
+	rand.Read(bytes)
+
+	return base64.URLEncoding.EncodeToString(bytes)
 }
 
 //Returns the client's unique session ID
@@ -68,14 +69,14 @@ func (c *Client) Request() *http.Request {
 	return c.request
 }
 
-func (s *Server) NewClient(upgrader ws.Upgrader, w http.ResponseWriter, r *http.Request) (*Client, error) {
+func (s *Server) NewClientWithID(upgrader ws.Upgrader, w http.ResponseWriter, r *http.Request, id string) (*Client, error) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return nil, err
 	}
 
 	client := &Client{
-		id:       genID(r),
+		id:       id,
 		conn:     conn,
 		connLock: new(sync.RWMutex),
 		request:  r,
@@ -83,6 +84,10 @@ func (s *Server) NewClient(upgrader ws.Upgrader, w http.ResponseWriter, r *http.
 	s.newClient <- client
 
 	return client, nil
+}
+
+func (s *Server) NewClient(upgrader ws.Upgrader, w http.ResponseWriter, r *http.Request) (*Client, error) {
+	return s.NewClientWithID(upgrader, w, r, genID())
 }
 
 func (c *Client) Close() error {
@@ -242,7 +247,7 @@ func (c *Client) cleanup(s *Server) {
 
 //Returns an array of rooms the client c has been added to
 func (s *Server) RoomsJoined(id string) []string {
-	var rooms []string
+	rooms := make([]string, len(s.joinedRooms[id]))
 	s.joinedRoomsLock.RLock()
 	defer s.joinedRoomsLock.RUnlock()
 
