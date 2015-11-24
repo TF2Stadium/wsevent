@@ -197,44 +197,46 @@ func (s *Server) RemoveClient(id, r string) {
 
 //Send all clients in room room data with type messageType
 func (s *Server) Broadcast(room string, data string) {
+	s.roomsLock.RLock()
 	for _, client := range s.rooms[room] {
 		//log.Printf("sending to %s in room %s\n", client.id, room)
 		go func(c *Client) {
 			c.Emit(data)
 		}(client)
 	}
+	s.roomsLock.RUnlock()
 }
 
 func (s *Server) BroadcastJSON(room string, v interface{}) {
+	s.roomsLock.RLock()
 	for _, client := range s.rooms[room] {
 		//log.Printf("sending to %s %s\n", client.id, room)
 		go func(c *Client) {
 			c.EmitJSON(v)
 		}(client)
 	}
+	s.roomsLock.RUnlock()
 }
 
 func (c *Client) cleanup(s *Server) {
 	c.conn.Close()
 
-	s.roomsLock.Lock()
+	s.joinedRoomsLock.RLock()
 	for _, room := range s.joinedRooms[c.id] {
 		//log.Println(room)
 		index := -1
 
+		s.roomsLock.Lock()
 		for i, client := range s.rooms[room] {
 			if client.id == c.id {
 				index = i
 			}
 		}
-		if index == -1 {
-			s.roomsLock.Unlock()
-			return
-		}
 
 		s.rooms[room] = append(s.rooms[room][:index], s.rooms[room][index+1:]...)
+		s.roomsLock.Unlock()
 	}
-	s.roomsLock.Unlock()
+	s.joinedRoomsLock.RUnlock()
 
 	s.joinedRoomsLock.Lock()
 	delete(s.joinedRooms, c.id)
