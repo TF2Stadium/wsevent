@@ -118,6 +118,9 @@ func (c *Client) EmitJSON(v interface{}) error {
 	js := emitPool.Get().(emitJS)
 	defer emitPool.Put(js)
 
+	js.Id = -1
+	js.Data = v
+
 	return c.conn.WriteJSON(js)
 }
 
