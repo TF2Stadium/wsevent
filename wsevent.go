@@ -103,15 +103,20 @@ func (c *Client) Emit(data string) error {
 	return c.conn.WriteMessage(ws.TextMessage, []byte(data))
 }
 
+type emitJS struct {
+	Id   int         `json:"id"`
+	Data interface{} `json:"data"`
+}
+
+var emitPool = &sync.Pool{New: func() interface{} { return emitJS{} }}
+
 //A thread-safe variant of EmitJSON
 func (c *Client) EmitJSON(v interface{}) error {
 	c.connLock.Lock()
 	defer c.connLock.Unlock()
 
-	js := struct {
-		Id   int         `json:"id"`
-		Data interface{} `json:"data"`
-	}{-1, v}
+	js := emitPool.Get().(emitJS)
+	defer emitPool.Put(js)
 
 	return c.conn.WriteJSON(js)
 }
@@ -161,36 +166,37 @@ func (s *Server) AddClient(c *Client, r string) {
 //Remove client c from room r
 func (s *Server) RemoveClient(id, r string) {
 	index := -1
-	s.roomsLock.Lock()
-
+	s.roomsLock.RLock()
 	for i, client := range s.rooms[r] {
 		if id == client.id {
 			index = i
 			break
 		}
 	}
+	s.roomsLock.RUnlock()
 	if index == -1 {
 		//log.Printf("Client %s not found in room %s", id, r)
-		s.roomsLock.Unlock()
 		return
 	}
 
+	s.roomsLock.Lock()
 	s.rooms[r] = append(s.rooms[r][:index], s.rooms[r][index+1:]...)
 	s.roomsLock.Unlock()
 
 	index = -1
-
-	s.joinedRoomsLock.Lock()
-	defer s.joinedRoomsLock.Unlock()
-
+	s.joinedRoomsLock.RLock()
 	for i, room := range s.joinedRooms[id] {
 		if room == r {
 			index = i
 		}
 	}
+	s.joinedRoomsLock.RUnlock()
 	if index == -1 {
 		return
 	}
+
+	s.joinedRoomsLock.Lock()
+	defer s.joinedRoomsLock.Unlock()
 
 	s.joinedRooms[id] = append(s.joinedRooms[id][:index], s.joinedRooms[id][index+1:]...)
 }
