@@ -195,7 +195,7 @@ func (s *Server) RemoveClient(id, r string) {
 	s.joinedRooms[id] = append(s.joinedRooms[id][:index], s.joinedRooms[id][index+1:]...)
 }
 
-//Send all clients in room room data with type messageType
+//Send all clients in room room data
 func (s *Server) Broadcast(room string, data string) {
 	s.roomsLock.RLock()
 	for _, client := range s.rooms[room] {
@@ -258,6 +258,21 @@ func (s *Server) RoomsJoined(id string) []string {
 	return rooms
 }
 
+type request struct {
+	Id   string
+	Data json.RawMessage
+}
+
+type reply struct {
+	Id   string `json:"id"`
+	Data string `json:"data,string"`
+}
+
+var (
+	reqPool   = &sync.Pool{New: func() interface{} { return request{} }}
+	replyPool = &sync.Pool{New: func() interface{} { return reply{} }}
+)
+
 func (c *Client) listener(s *Server) {
 	for {
 		mtype, data, err := c.conn.ReadMessage()
@@ -266,10 +281,7 @@ func (c *Client) listener(s *Server) {
 			return
 		}
 
-		var js struct {
-			Id   string
-			Data json.RawMessage
-		}
+		js := reqPool.Get().(request)
 		err = json.Unmarshal(data, &js)
 
 		if err != nil || mtype != ws.TextMessage {
@@ -293,13 +305,16 @@ func (c *Client) listener(s *Server) {
 	call:
 		go func() {
 			rtrn := f(s, c, js.Data)
-			reply := struct {
-				Id   string `json:"id"`
-				Data string `json:"data,string"`
-			}{js.Id, string(rtrn)}
 
-			bytes, _ := json.Marshal(reply)
+			replyJs := replyPool.Get().(reply)
+			replyJs.Id = js.Id
+			replyJs.Data = string(rtrn)
+
+			bytes, _ := json.Marshal(replyJs)
 			c.Emit(string(bytes))
+
+			reqPool.Put(js)
+			replyPool.Put(replyJs)
 		}()
 	}
 }
