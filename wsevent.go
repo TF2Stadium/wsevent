@@ -39,7 +39,7 @@ type Server struct {
 
 	//The extractor function reads the byte array and the message type
 	//and returns the event represented by the message.
-	Extractor func(string) string
+	Extractor func([]byte) string
 	//Called when the websocket connection closes. The disconnected client's
 	//session ID is sent as an argument
 	OnDisconnect func(string)
@@ -157,8 +157,8 @@ func (s *Server) AddClient(c *Client, r string) {
 	s.joinedRoomsLock.RUnlock()
 
 	s.roomsLock.Lock()
-	defer s.roomsLock.Unlock()
 	s.rooms[r] = append(s.rooms[r], c)
+	s.roomsLock.Unlock()
 
 	s.joinedRoomsLock.Lock()
 	defer s.joinedRoomsLock.Unlock()
@@ -298,7 +298,7 @@ func (c *Client) listener(s *Server) {
 			continue
 		}
 
-		callName := s.Extractor(string(js.Data))
+		callName := s.Extractor(js.Data)
 
 		s.handlersLock.RLock()
 		f, ok := s.handlers[callName]
