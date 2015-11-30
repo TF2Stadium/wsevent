@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"reflect"
 	"sync"
 
 	ws "github.com/gorilla/websocket"
@@ -26,6 +27,8 @@ type Client struct {
 	connLock *sync.RWMutex
 	request  *http.Request
 }
+
+type Handler func(*Server, *Client, []byte) []byte
 
 //Server
 type Server struct {
@@ -44,9 +47,9 @@ type Server struct {
 	//session ID is sent as an argument
 	OnDisconnect func(string)
 	//Called when no event handler for a specific event exists
-	DefaultHandler func(*Server, *Client, []byte) []byte
+	DefaultHandler Handler
 
-	handlers     map[string]func(*Server, *Client, []byte) []byte
+	handlers     map[string]Handler
 	handlersLock *sync.RWMutex
 
 	newClient chan *Client
@@ -134,7 +137,7 @@ func NewServer() *Server {
 		joinedRooms:     make(map[string][]string),
 		joinedRoomsLock: new(sync.RWMutex),
 
-		handlers:     make(map[string](func(*Server, *Client, []byte) []byte)),
+		handlers:     make(map[string]Handler),
 		handlersLock: new(sync.RWMutex),
 
 		newClient: make(chan *Client),
@@ -337,8 +340,40 @@ func (s *Server) listener() {
 
 //Registers a callback for the event string. The callback must take 2 arguments,
 //The client from which the message was received and the string message itself.
-func (s *Server) On(event string, f func(*Server, *Client, []byte) []byte) {
+func (s *Server) On(event string, f Handler) {
 	s.handlersLock.Lock()
 	s.handlers[event] = f
 	s.handlersLock.Unlock()
+}
+
+//A Receiver interface implements the Name method, which returns a name for the
+//event, given a Handler's name
+type Receiver interface {
+	Name(string) string
+}
+
+//Similar to net/rpc's Register, expect that rcvr needs to implement the
+//Receiver interface
+func (s *Server) Register(rcvr Receiver) {
+	rval := reflect.ValueOf(rcvr)
+	rtype := reflect.TypeOf(rcvr)
+
+	for i := 0; i < rval.NumMethod(); i++ {
+		method := rval.Method(i)
+		name := rtype.Method(i).Name
+		if name == "Name" {
+			continue
+		}
+
+		s.On(rcvr.Name(name), func(_ *Server, c *Client, b []byte) []byte {
+			in := []reflect.Value{
+				reflect.ValueOf(s),
+				reflect.ValueOf(c),
+				reflect.ValueOf(b)}
+
+			rtrn := method.Call(in)
+			return rtrn[0].Bytes()
+		})
+
+	}
 }
