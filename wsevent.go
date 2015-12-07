@@ -355,23 +355,22 @@ type Receiver interface {
 //Similar to net/rpc's Register, expect that rcvr needs to implement the
 //Receiver interface
 func (s *Server) Register(rcvr Receiver) {
-	rval := reflect.ValueOf(rcvr)
 	rtype := reflect.TypeOf(rcvr)
 
-	for i := 0; i < rval.NumMethod(); i++ {
-		method := rval.Method(i)
-		name := rtype.Method(i).Name
-		if name == "Name" {
+	for i := 0; i < rtype.NumMethod(); i++ {
+		method := rtype.Method(i)
+		if method.Name == "Name" {
 			continue
 		}
 
-		s.On(rcvr.Name(name), func(_ *Server, c *Client, b []byte) []byte {
+		s.On(rcvr.Name(method.Name), func(_ *Server, c *Client, b []byte) []byte {
 			in := []reflect.Value{
+				reflect.ValueOf(rcvr),
 				reflect.ValueOf(s),
 				reflect.ValueOf(c),
 				reflect.ValueOf(b)}
 
-			rtrn := method.Call(in)
+			rtrn := method.Func.Call(in)
 			return rtrn[0].Bytes()
 		})
 
