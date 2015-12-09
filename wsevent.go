@@ -7,12 +7,8 @@
 package wsevent
 
 import (
-	"encoding/json"
-	"log"
 	"reflect"
 	"sync"
-
-	ws "github.com/gorilla/websocket"
 )
 
 type Handler func(*Server, *Client, []byte) []byte
