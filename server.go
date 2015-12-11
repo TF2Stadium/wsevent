@@ -38,27 +38,6 @@ type Server struct {
 	newClient chan *Client
 }
 
-type emitJS struct {
-	Id   int         `json:"id"`
-	Data interface{} `json:"data"`
-}
-
-var emitPool = &sync.Pool{New: func() interface{} { return emitJS{} }}
-
-//A thread-safe variant of EmitJSON
-func (c *Client) EmitJSON(v interface{}) error {
-	c.connLock.Lock()
-	defer c.connLock.Unlock()
-
-	js := emitPool.Get().(emitJS)
-	defer emitPool.Put(js)
-
-	js.Id = -1
-	js.Data = v
-
-	return c.conn.WriteJSON(js)
-}
-
 //Return a new server object
 func NewServer() *Server {
 	s := &Server{
