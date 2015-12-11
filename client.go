@@ -138,10 +138,7 @@ func (c *Client) cleanup(s *Server) {
 }
 
 func (c *Client) listener(s *Server) {
-	throttle := time.NewTicker(time.Millisecond * 10)
-	defer throttle.Stop()
 	for {
-		<-throttle.C
 		mtype, data, err := c.conn.ReadMessage()
 		if err != nil {
 			c.cleanup(s)
@@ -184,5 +181,6 @@ func (c *Client) listener(s *Server) {
 			reqPool.Put(js)
 			replyPool.Put(replyJs)
 		}()
+		time.Sleep(10 * time.Millisecond)
 	}
 }
