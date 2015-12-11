@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	ws "github.com/gorilla/websocket"
 )
@@ -87,6 +88,27 @@ func (c *Client) Emit(data string) error {
 	return c.conn.WriteMessage(ws.TextMessage, []byte(data))
 }
 
+type emitJS struct {
+	Id   int         `json:"id"`
+	Data interface{} `json:"data"`
+}
+
+var emitPool = &sync.Pool{New: func() interface{} { return emitJS{} }}
+
+//A thread-safe variant of EmitJSON
+func (c *Client) EmitJSON(v interface{}) error {
+	c.connLock.Lock()
+	defer c.connLock.Unlock()
+
+	js := emitPool.Get().(emitJS)
+	defer emitPool.Put(js)
+
+	js.Id = -1
+	js.Data = v
+
+	return c.conn.WriteJSON(js)
+}
+
 func (c *Client) cleanup(s *Server) {
 	c.conn.Close()
 
@@ -117,18 +139,23 @@ func (c *Client) cleanup(s *Server) {
 }
 
 func (c *Client) listener(s *Server) {
+	throttle := time.NewTicker(time.Millisecond * 10)
+	defer throttle.Stop()
 	for {
+		<-throttle.C
 		mtype, data, err := c.conn.ReadMessage()
 		if err != nil {
 			c.cleanup(s)
 			return
 		}
+		if mtype != ws.TextMessage {
+			c.conn.Close()
+			return
+		}
 
 		js := reqPool.Get().(request)
-		err = json.Unmarshal(data, &js)
 
-		if err != nil || mtype != ws.TextMessage {
-			log.Println(err)
+		if err := json.Unmarshal(data, &js); err != nil {
 			continue
 		}
 
@@ -148,7 +175,6 @@ func (c *Client) listener(s *Server) {
 	call:
 		go func() {
 			rtrn := f(s, c, js.Data)
-
 			replyJs := replyPool.Get().(reply)
 			replyJs.Id = js.Id
 			replyJs.Data = string(rtrn)
