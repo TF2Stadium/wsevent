@@ -16,9 +16,9 @@ type Client struct {
 	//Session ID
 	id string
 
-	conn     *ws.Conn
-	connLock *sync.RWMutex
-	request  *http.Request
+	conn    *ws.Conn
+	send    chan []byte
+	request *http.Request
 }
 
 type request struct {
@@ -27,8 +27,8 @@ type request struct {
 }
 
 type reply struct {
-	Id   string `json:"id"`
-	Data string `json:"data,string"`
+	Id   string      `json:"id"`
+	Data interface{} `json:"data"`
 }
 
 var (
@@ -60,10 +60,10 @@ func (s *Server) NewClientWithID(upgrader ws.Upgrader, w http.ResponseWriter, r 
 	}
 
 	client := &Client{
-		id:       id,
-		conn:     conn,
-		connLock: new(sync.RWMutex),
-		request:  r,
+		id:      id,
+		conn:    conn,
+		send:    make(chan []byte),
+		request: r,
 	}
 	s.newClient <- client
 
@@ -74,17 +74,9 @@ func (s *Server) NewClient(upgrader ws.Upgrader, w http.ResponseWriter, r *http.
 	return s.NewClientWithID(upgrader, w, r, genID())
 }
 
-func (c *Client) Close() error {
-	c.connLock.Lock()
-	defer c.connLock.Unlock()
-	return c.conn.Close()
-}
-
 //A thread-safe variant of WriteMessage
-func (c *Client) Emit(data string) error {
-	c.connLock.Lock()
-	defer c.connLock.Unlock()
-	return c.conn.WriteMessage(ws.TextMessage, []byte(data))
+func (c *Client) Emit(data string) {
+	c.send <- []byte(data)
 }
 
 type emitJS struct {
@@ -92,20 +84,19 @@ type emitJS struct {
 	Data interface{} `json:"data"`
 }
 
-var emitPool = &sync.Pool{New: func() interface{} { return emitJS{} }}
-
 //A thread-safe variant of EmitJSON
 func (c *Client) EmitJSON(v interface{}) error {
-	c.connLock.Lock()
-	defer c.connLock.Unlock()
-
-	js := emitPool.Get().(emitJS)
-	defer emitPool.Put(js)
-
+	js := emitJS{}
 	js.Id = -1
 	js.Data = v
 
-	return c.conn.WriteJSON(js)
+	bytes, err := json.Marshal(js)
+	if err != nil {
+		return err
+	}
+
+	c.send <- bytes
+	return nil
 }
 
 func (c *Client) cleanup(s *Server) {
@@ -138,24 +129,53 @@ func (c *Client) cleanup(s *Server) {
 }
 
 func (c *Client) listener(s *Server) {
+	close := make(chan struct{})
+	recv := make(chan []byte)
+	tick := time.NewTicker(time.Millisecond * 10)
+	go func() {
+		for {
+			select {
+			case data := <-c.send:
+				c.conn.WriteMessage(ws.TextMessage, data)
+			case <-close:
+				return
+			}
+		}
+	}()
+	go func() {
+		for {
+			select {
+			case <-tick.C:
+				mtype, data, err := c.conn.ReadMessage()
+				if err != nil {
+					c.cleanup(s)
+					recv <- []byte{}
+					close <- struct{}{}
+					tick.Stop()
+					return
+				}
+				if mtype != ws.TextMessage {
+					continue
+				}
+
+				recv <- data
+			}
+		}
+	}()
+
 	for {
-		mtype, data, err := c.conn.ReadMessage()
-		if err != nil {
-			c.cleanup(s)
-			return
-		}
-		if mtype != ws.TextMessage {
-			c.conn.Close()
+		data := <-recv
+		if len(data) == 0 {
 			return
 		}
 
-		js := reqPool.Get().(request)
+		req := reqPool.Get().(request)
 
-		if err := json.Unmarshal(data, &js); err != nil {
+		if err := json.Unmarshal(data, &req); err != nil {
 			continue
 		}
 
-		callName := s.Extractor(js.Data)
+		callName := s.Extractor(req.Data)
 
 		s.handlersLock.RLock()
 		f, ok := s.handlers[callName]
@@ -170,17 +190,16 @@ func (c *Client) listener(s *Server) {
 		}
 	call:
 		go func() {
-			rtrn := f(s, c, js.Data)
-			replyJs := replyPool.Get().(reply)
-			replyJs.Id = js.Id
-			replyJs.Data = string(rtrn)
+			rtrn := f(s, c, req.Data)
+			reply := replyPool.Get().(reply)
+			reply.Id = req.Id
+			reply.Data = rtrn
 
-			bytes, _ := json.Marshal(replyJs)
-			c.Emit(string(bytes))
+			bytes, _ := json.Marshal(reply)
+			c.send <- bytes
 
-			reqPool.Put(js)
-			replyPool.Put(replyJs)
+			reqPool.Put(req)
+			replyPool.Put(reply)
 		}()
-		time.Sleep(10 * time.Millisecond)
 	}
 }
