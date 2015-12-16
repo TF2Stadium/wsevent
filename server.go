@@ -36,6 +36,7 @@ type Server struct {
 	handlersLock *sync.RWMutex
 
 	newClient chan *Client
+	stop      chan struct{}
 }
 
 //Return a new server object
@@ -52,10 +53,15 @@ func NewServer() *Server {
 		handlersLock: new(sync.RWMutex),
 
 		newClient: make(chan *Client),
+		stop:      make(chan struct{}),
 	}
 
 	go s.listener()
 	return s
+}
+
+func (s *Server) Close() {
+	s.stop <- struct{}{}
 }
 
 //Add a client c to room r
@@ -98,6 +104,9 @@ func (s *Server) RemoveClient(id, r string) {
 
 	s.roomsLock.Lock()
 	s.rooms[r] = append(s.rooms[r][:index], s.rooms[r][index+1:]...)
+	if len(s.rooms[r]) == 0 {
+		delete(s.rooms, r)
+	}
 	s.roomsLock.Unlock()
 
 	index = -1
@@ -116,6 +125,9 @@ func (s *Server) RemoveClient(id, r string) {
 	defer s.joinedRoomsLock.Unlock()
 
 	s.joinedRooms[id] = append(s.joinedRooms[id][:index], s.joinedRooms[id][index+1:]...)
+	if len(s.joinedRooms[id]) == 0 {
+		delete(s.joinedRooms, id)
+	}
 }
 
 //Send all clients in room room data
@@ -153,8 +165,12 @@ func (s *Server) RoomsJoined(id string) []string {
 }
 func (s *Server) listener() {
 	for {
-		c := <-s.newClient
-		go c.listener(s)
+		select {
+		case c := <-s.newClient:
+			go c.listener(s)
+		case <-s.stop:
+			return
+		}
 	}
 }
 

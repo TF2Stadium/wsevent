@@ -18,7 +18,10 @@ type Client struct {
 
 	conn    *ws.Conn
 	send    chan []byte
+	recv    chan []byte
 	request *http.Request
+
+	close chan struct{}
 }
 
 type request struct {
@@ -64,6 +67,8 @@ func (s *Server) NewClientWithID(upgrader ws.Upgrader, w http.ResponseWriter, r 
 		conn:    conn,
 		send:    make(chan []byte),
 		request: r,
+
+		close: make(chan struct{}, 3),
 	}
 	s.newClient <- client
 
@@ -99,6 +104,14 @@ func (c *Client) EmitJSON(v interface{}) error {
 	return nil
 }
 
+func (c *Client) Close() {
+	for i := 0; i < 3; i++ {
+		c.close <- struct{}{}
+	}
+
+	c.conn.Close()
+}
+
 func (c *Client) cleanup(s *Server) {
 	c.conn.Close()
 
@@ -129,15 +142,14 @@ func (c *Client) cleanup(s *Server) {
 }
 
 func (c *Client) listener(s *Server) {
-	close := make(chan struct{})
-	recv := make(chan []byte)
 	tick := time.NewTicker(time.Millisecond * 10)
 	go func() {
 		for {
 			select {
 			case data := <-c.send:
 				c.conn.WriteMessage(ws.TextMessage, data)
-			case <-close:
+
+			case <-c.close:
 				return
 			}
 		}
@@ -149,8 +161,8 @@ func (c *Client) listener(s *Server) {
 				mtype, data, err := c.conn.ReadMessage()
 				if err != nil {
 					c.cleanup(s)
-					recv <- []byte{}
-					close <- struct{}{}
+					c.recv <- []byte{}
+					c.close <- struct{}{}
 					tick.Stop()
 					return
 				}
@@ -158,48 +170,56 @@ func (c *Client) listener(s *Server) {
 					continue
 				}
 
-				recv <- data
+				c.recv <- data
+
+			case <-c.close:
+				return
 			}
 		}
 	}()
 
 	for {
-		data := <-recv
-		if len(data) == 0 {
+		select {
+		case data := <-c.recv:
+			if len(data) == 0 {
+				return
+			}
+
+			req := reqPool.Get().(request)
+
+			if err := json.Unmarshal(data, &req); err != nil {
+				continue
+			}
+
+			callName := s.Extractor(req.Data)
+
+			s.handlersLock.RLock()
+			f, ok := s.handlers[callName]
+			s.handlersLock.RUnlock()
+
+			if !ok {
+				if s.DefaultHandler != nil {
+					f = s.DefaultHandler
+					goto call
+				}
+				continue
+			}
+		call:
+			go func() {
+				rtrn := f(s, c, req.Data)
+				reply := replyPool.Get().(reply)
+				reply.Id = req.Id
+				reply.Data = rtrn
+
+				bytes, _ := json.Marshal(reply)
+				c.send <- bytes
+
+				reqPool.Put(req)
+				replyPool.Put(reply)
+			}()
+
+		case <-c.close:
 			return
 		}
-
-		req := reqPool.Get().(request)
-
-		if err := json.Unmarshal(data, &req); err != nil {
-			continue
-		}
-
-		callName := s.Extractor(req.Data)
-
-		s.handlersLock.RLock()
-		f, ok := s.handlers[callName]
-		s.handlersLock.RUnlock()
-
-		if !ok {
-			if s.DefaultHandler != nil {
-				f = s.DefaultHandler
-				goto call
-			}
-			continue
-		}
-	call:
-		go func() {
-			rtrn := f(s, c, req.Data)
-			reply := replyPool.Get().(reply)
-			reply.Id = req.Id
-			reply.Data = rtrn
-
-			bytes, _ := json.Marshal(reply)
-			c.send <- bytes
-
-			reqPool.Put(req)
-			replyPool.Put(reply)
-		}()
 	}
 }
