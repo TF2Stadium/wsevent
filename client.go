@@ -66,6 +66,7 @@ func (s *Server) NewClientWithID(upgrader ws.Upgrader, w http.ResponseWriter, r 
 		id:      id,
 		conn:    conn,
 		send:    make(chan []byte),
+		recv:    make(chan []byte),
 		request: r,
 
 		close: make(chan struct{}, 3),
