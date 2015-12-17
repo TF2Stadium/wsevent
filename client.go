@@ -164,6 +164,7 @@ func (c *Client) listener(s *Server) {
 					c.cleanup(s)
 					c.recv <- []byte{}
 					c.close <- struct{}{}
+					c.close <- struct{}{}
 					tick.Stop()
 					return
 				}
