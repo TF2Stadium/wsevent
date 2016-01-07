@@ -129,6 +129,9 @@ func (c *Client) cleanup(s *Server) {
 		}
 
 		s.rooms[room] = append(s.rooms[room][:index], s.rooms[room][index+1:]...)
+		if len(s.rooms[room]) == 0 {
+			delete(s.rooms, room)
+		}
 		s.roomsLock.Unlock()
 	}
 	s.joinedRoomsLock.RUnlock()
