@@ -153,6 +153,19 @@ func (s *Server) BroadcastJSON(room string, v interface{}) {
 	s.roomsLock.RUnlock()
 }
 
+//Returns a map of room name -> number of clients
+func (s *Server) Rooms() map[string]int {
+	rooms := make(map[string]int)
+
+	s.roomsLock.RLock()
+	defer s.roomsLock.RUnlock()
+	for room, clients := range s.rooms {
+		rooms[room] = len(clients)
+	}
+
+	return rooms
+}
+
 //Returns an array of rooms the client c has been added to
 func (s *Server) RoomsJoined(id string) []string {
 	rooms := make([]string, len(s.joinedRooms[id]))
