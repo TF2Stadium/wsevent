@@ -11,7 +11,7 @@ import (
 	"sync"
 )
 
-type Handler func(*Server, *Client, []byte) interface{}
+type Handler func(*Client, []byte) interface{}
 
 //Server
 type Server struct {
@@ -212,10 +212,9 @@ func (s *Server) Register(rcvr Receiver) {
 			continue
 		}
 
-		s.On(rcvr.Name(method.Name), func(_ *Server, c *Client, b []byte) interface{} {
+		s.On(rcvr.Name(method.Name), func(c *Client, b []byte) interface{} {
 			in := []reflect.Value{
 				reflect.ValueOf(rcvr),
-				reflect.ValueOf(s),
 				reflect.ValueOf(c),
 				reflect.ValueOf(b)}
 

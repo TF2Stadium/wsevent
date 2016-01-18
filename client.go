@@ -211,7 +211,7 @@ func (c *Client) listener(s *Server) {
 			}
 		call:
 			go func() {
-				rtrn := f(s, c, req.Data)
+				rtrn := f(c, req.Data)
 				reply := replyPool.Get().(reply)
 				reply.Id = req.Id
 				reply.Data = rtrn

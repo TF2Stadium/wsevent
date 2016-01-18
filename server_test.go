@@ -111,7 +111,7 @@ func TestClient(t *testing.T) {
 
 type TestObject struct{}
 
-func (TestObject) Add(server *Server, so *Client, data []byte) interface{} {
+func (TestObject) Add(so *Client, data []byte) interface{} {
 	var args struct {
 		A, B int
 	}
@@ -167,7 +167,7 @@ func TestHandler(t *testing.T) {
 	}
 
 	server.Register(TestObject{})
-	server.On("subtract", func(_ *Server, _ *Client, data []byte) interface{} {
+	server.On("subtract", func(_ *Client, data []byte) interface{} {
 		var args struct {
 			A, B int
 		}
