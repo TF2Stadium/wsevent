@@ -67,7 +67,7 @@ func (s *Server) Close() {
 //Add a client c to room r
 func (s *Server) AddClient(c *Client, r string) {
 	s.joinedRoomsLock.RLock()
-	for _, room := range s.joinedRooms[c.id] {
+	for _, room := range s.joinedRooms[c.ID] {
 		if r == room {
 			//log.Printf("%s already in room %s", c.id, r)
 			s.joinedRoomsLock.RUnlock()
@@ -82,16 +82,16 @@ func (s *Server) AddClient(c *Client, r string) {
 
 	s.joinedRoomsLock.Lock()
 	defer s.joinedRoomsLock.Unlock()
-	s.joinedRooms[c.id] = append(s.joinedRooms[c.id], r)
+	s.joinedRooms[c.ID] = append(s.joinedRooms[c.ID], r)
 	//log.Printf("Added %s to room %s", c.id, r)
 }
 
 //Remove client c from room r
-func (s *Server) RemoveClient(id, r string) {
+func (s *Server) RemoveClient(client *Client, r string) {
 	index := -1
 	s.roomsLock.RLock()
 	for i, client := range s.rooms[r] {
-		if id == client.id {
+		if client.ID == client.ID {
 			index = i
 			break
 		}
@@ -111,7 +111,7 @@ func (s *Server) RemoveClient(id, r string) {
 
 	index = -1
 	s.joinedRoomsLock.RLock()
-	for i, room := range s.joinedRooms[id] {
+	for i, room := range s.joinedRooms[client.ID] {
 		if room == r {
 			index = i
 		}
@@ -124,9 +124,9 @@ func (s *Server) RemoveClient(id, r string) {
 	s.joinedRoomsLock.Lock()
 	defer s.joinedRoomsLock.Unlock()
 
-	s.joinedRooms[id] = append(s.joinedRooms[id][:index], s.joinedRooms[id][index+1:]...)
-	if len(s.joinedRooms[id]) == 0 {
-		delete(s.joinedRooms, id)
+	s.joinedRooms[client.ID] = append(s.joinedRooms[client.ID][:index], s.joinedRooms[client.ID][index+1:]...)
+	if len(s.joinedRooms[client.ID]) == 0 {
+		delete(s.joinedRooms, client.ID)
 	}
 }
 

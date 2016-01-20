@@ -14,12 +14,12 @@ import (
 //Client
 type Client struct {
 	//Session ID
-	id string
+	ID      string
+	Request *http.Request
 
-	conn    *ws.Conn
-	send    chan []byte
-	recv    chan []byte
-	request *http.Request
+	conn *ws.Conn
+	send chan []byte
+	recv chan []byte
 
 	close chan struct{}
 }
@@ -46,16 +46,6 @@ func genID() string {
 	return base64.URLEncoding.EncodeToString(bytes)
 }
 
-//Returns the client's unique session ID
-func (c *Client) Id() string {
-	return c.id
-}
-
-// Returns the first http request when established connection.
-func (c *Client) Request() *http.Request {
-	return c.request
-}
-
 func (s *Server) NewClientWithID(upgrader ws.Upgrader, w http.ResponseWriter, r *http.Request, id string) (*Client, error) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -63,11 +53,12 @@ func (s *Server) NewClientWithID(upgrader ws.Upgrader, w http.ResponseWriter, r 
 	}
 
 	client := &Client{
-		id:      id,
-		conn:    conn,
-		send:    make(chan []byte),
-		recv:    make(chan []byte),
-		request: r,
+		ID:      id,
+		Request: r,
+
+		conn: conn,
+		send: make(chan []byte),
+		recv: make(chan []byte),
 
 		close: make(chan struct{}, 3),
 	}
@@ -117,13 +108,13 @@ func (c *Client) cleanup(s *Server) {
 	c.conn.Close()
 
 	s.joinedRoomsLock.RLock()
-	for _, room := range s.joinedRooms[c.id] {
+	for _, room := range s.joinedRooms[c.ID] {
 		//log.Println(room)
 		index := -1
 
 		s.roomsLock.Lock()
 		for i, client := range s.rooms[room] {
-			if client.id == c.id {
+			if client.ID == c.ID {
 				index = i
 			}
 		}
@@ -137,11 +128,11 @@ func (c *Client) cleanup(s *Server) {
 	s.joinedRoomsLock.RUnlock()
 
 	s.joinedRoomsLock.Lock()
-	delete(s.joinedRooms, c.id)
+	delete(s.joinedRooms, c.ID)
 	s.joinedRoomsLock.Unlock()
 
 	if s.OnDisconnect != nil {
-		s.OnDisconnect(c.id)
+		s.OnDisconnect(c.ID)
 	}
 }
 

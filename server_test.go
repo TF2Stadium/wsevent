@@ -70,12 +70,12 @@ func TestClient(t *testing.T) {
 
 	defer conn.Close()
 
-	if client.Request() == nil {
+	if client.Request == nil {
 		t.Fatal("Request() shouldn't be nil")
 		return
 	}
 
-	rooms := server.RoomsJoined(client.Id())
+	rooms := server.RoomsJoined(client.ID)
 	if rooms[0] != "0" {
 		t.Fatalf("Client not added to room %s. Current rooms: %v", room, rooms)
 		return
@@ -95,7 +95,7 @@ func TestClient(t *testing.T) {
 		t.Fatalf("Received the wrong data: %s", string(data))
 	}
 
-	server.RemoveClient(client.Id(), room)
+	server.RemoveClient(client.ID, room)
 	server.Broadcast(room, "test")
 
 	_, data, err = conn.ReadMessage()
