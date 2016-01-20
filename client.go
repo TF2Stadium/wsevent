@@ -110,19 +110,20 @@ func (c *Client) cleanup(s *Server) {
 	s.joinedRoomsMu.RLock()
 	for _, room := range s.joinedRooms[c.ID] {
 		//log.Println(room)
-		index := -1
-
 		s.roomsMu.Lock()
 		for i, client := range s.rooms[room] {
 			if client.ID == c.ID {
-				index = i
+				clients := s.rooms[room]
+				clients[i] = clients[len(clients)-1]
+				clients[len(clients)-1] = nil
+				s.rooms[room] = clients[:len(clients)-1]
+				if len(s.rooms[room]) == 0 {
+					delete(s.rooms, room)
+				}
+				break
 			}
 		}
 
-		s.rooms[room] = append(s.rooms[room][:index], s.rooms[room][index+1:]...)
-		if len(s.rooms[room]) == 0 {
-			delete(s.rooms, room)
-		}
 		s.roomsMu.Unlock()
 	}
 	s.joinedRoomsMu.RUnlock()

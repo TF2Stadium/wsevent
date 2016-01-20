@@ -91,7 +91,10 @@ func (s *Server) RemoveClient(client *Client, r string) {
 	s.roomsMu.Lock()
 	for i, joinedClient := range s.rooms[r] {
 		if client.ID == joinedClient.ID {
-			s.rooms[r] = append(s.rooms[r][:i], s.rooms[r][i+1:]...)
+			clients := s.rooms[r]
+			clients[i] = clients[len(clients)-1]
+			clients[len(clients)-1] = nil
+			s.rooms[r] = clients[:len(clients)-1]
 			if len(s.rooms[r]) == 0 {
 				delete(s.rooms, r)
 			}
