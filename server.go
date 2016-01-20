@@ -88,46 +88,29 @@ func (s *Server) AddClient(c *Client, r string) {
 
 //Remove client c from room r
 func (s *Server) RemoveClient(client *Client, r string) {
-	index := -1
-	s.roomsLock.RLock()
-	for i, client := range s.rooms[r] {
-		if client.ID == client.ID {
-			index = i
+	s.roomsLock.Lock()
+	for i, joinedClient := range s.rooms[r] {
+		if client.ID == joinedClient.ID {
+			s.rooms[r] = append(s.rooms[r][:i], s.rooms[r][i+1:]...)
+			if len(s.rooms[r]) == 0 {
+				delete(s.rooms, r)
+			}
 			break
 		}
 	}
-	s.roomsLock.RUnlock()
-	if index == -1 {
-		//log.Printf("Client %s not found in room %s", id, r)
-		return
-	}
-
-	s.roomsLock.Lock()
-	s.rooms[r] = append(s.rooms[r][:index], s.rooms[r][index+1:]...)
-	if len(s.rooms[r]) == 0 {
-		delete(s.rooms, r)
-	}
 	s.roomsLock.Unlock()
 
-	index = -1
-	s.joinedRoomsLock.RLock()
+	s.joinedRoomsLock.Lock()
 	for i, room := range s.joinedRooms[client.ID] {
 		if room == r {
-			index = i
+			s.joinedRooms[client.ID] = append(s.joinedRooms[client.ID][:i], s.joinedRooms[client.ID][i+1:]...)
+			if len(s.joinedRooms[client.ID]) == 0 {
+				delete(s.joinedRooms, client.ID)
+			}
 		}
 	}
-	s.joinedRoomsLock.RUnlock()
-	if index == -1 {
-		return
-	}
+	s.joinedRoomsLock.Unlock()
 
-	s.joinedRoomsLock.Lock()
-	defer s.joinedRoomsLock.Unlock()
-
-	s.joinedRooms[client.ID] = append(s.joinedRooms[client.ID][:index], s.joinedRooms[client.ID][index+1:]...)
-	if len(s.joinedRooms[client.ID]) == 0 {
-		delete(s.joinedRooms, client.ID)
-	}
 }
 
 //Send all clients in room room data
