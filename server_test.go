@@ -95,7 +95,7 @@ func TestClient(t *testing.T) {
 		t.Fatalf("Received the wrong data: %s", string(data))
 	}
 
-	server.RemoveClient(client.ID, room)
+	server.RemoveClient(client, room)
 	server.Broadcast(room, "test")
 
 	_, data, err = conn.ReadMessage()
