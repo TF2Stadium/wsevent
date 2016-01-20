@@ -107,12 +107,12 @@ func (c *Client) Close() {
 func (c *Client) cleanup(s *Server) {
 	c.conn.Close()
 
-	s.joinedRoomsLock.RLock()
+	s.joinedRoomsMu.RLock()
 	for _, room := range s.joinedRooms[c.ID] {
 		//log.Println(room)
 		index := -1
 
-		s.roomsLock.Lock()
+		s.roomsMu.Lock()
 		for i, client := range s.rooms[room] {
 			if client.ID == c.ID {
 				index = i
@@ -123,13 +123,13 @@ func (c *Client) cleanup(s *Server) {
 		if len(s.rooms[room]) == 0 {
 			delete(s.rooms, room)
 		}
-		s.roomsLock.Unlock()
+		s.roomsMu.Unlock()
 	}
-	s.joinedRoomsLock.RUnlock()
+	s.joinedRoomsMu.RUnlock()
 
-	s.joinedRoomsLock.Lock()
+	s.joinedRoomsMu.Lock()
 	delete(s.joinedRooms, c.ID)
-	s.joinedRoomsLock.Unlock()
+	s.joinedRoomsMu.Unlock()
 
 	if s.OnDisconnect != nil {
 		s.OnDisconnect(c.ID)

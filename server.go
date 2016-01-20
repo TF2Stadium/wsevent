@@ -16,12 +16,12 @@ type Handler func(*Client, []byte) interface{}
 //Server
 type Server struct {
 	//maps room string to a list of clients in it
-	rooms     map[string]([]*Client)
-	roomsLock *sync.RWMutex
+	rooms   map[string]([]*Client)
+	roomsMu *sync.RWMutex
 
 	//maps client IDs to the list of rooms the corresponding client has joined
-	joinedRooms     map[string][]string
-	joinedRoomsLock *sync.RWMutex
+	joinedRooms   map[string][]string
+	joinedRoomsMu *sync.RWMutex
 
 	//The extractor function reads the byte array and the message type
 	//and returns the event represented by the message.
@@ -42,12 +42,12 @@ type Server struct {
 //Return a new server object
 func NewServer() *Server {
 	s := &Server{
-		rooms:     make(map[string]([]*Client)),
-		roomsLock: new(sync.RWMutex),
+		rooms:   make(map[string]([]*Client)),
+		roomsMu: new(sync.RWMutex),
 
 		//Maps socket ID -> list of rooms the client is in
-		joinedRooms:     make(map[string][]string),
-		joinedRoomsLock: new(sync.RWMutex),
+		joinedRooms:   make(map[string][]string),
+		joinedRoomsMu: new(sync.RWMutex),
 
 		handlers:     make(map[string]Handler),
 		handlersLock: new(sync.RWMutex),
@@ -66,29 +66,29 @@ func (s *Server) Close() {
 
 //Add a client c to room r
 func (s *Server) AddClient(c *Client, r string) {
-	s.joinedRoomsLock.RLock()
+	s.joinedRoomsMu.RLock()
 	for _, room := range s.joinedRooms[c.ID] {
 		if r == room {
 			//log.Printf("%s already in room %s", c.id, r)
-			s.joinedRoomsLock.RUnlock()
+			s.joinedRoomsMu.RUnlock()
 			return
 		}
 	}
-	s.joinedRoomsLock.RUnlock()
+	s.joinedRoomsMu.RUnlock()
 
-	s.roomsLock.Lock()
+	s.roomsMu.Lock()
 	s.rooms[r] = append(s.rooms[r], c)
-	s.roomsLock.Unlock()
+	s.roomsMu.Unlock()
 
-	s.joinedRoomsLock.Lock()
-	defer s.joinedRoomsLock.Unlock()
+	s.joinedRoomsMu.Lock()
+	defer s.joinedRoomsMu.Unlock()
 	s.joinedRooms[c.ID] = append(s.joinedRooms[c.ID], r)
 	//log.Printf("Added %s to room %s", c.id, r)
 }
 
 //Remove client c from room r
 func (s *Server) RemoveClient(client *Client, r string) {
-	s.roomsLock.Lock()
+	s.roomsMu.Lock()
 	for i, joinedClient := range s.rooms[r] {
 		if client.ID == joinedClient.ID {
 			s.rooms[r] = append(s.rooms[r][:i], s.rooms[r][i+1:]...)
@@ -98,9 +98,9 @@ func (s *Server) RemoveClient(client *Client, r string) {
 			break
 		}
 	}
-	s.roomsLock.Unlock()
+	s.roomsMu.Unlock()
 
-	s.joinedRoomsLock.Lock()
+	s.joinedRoomsMu.Lock()
 	for i, room := range s.joinedRooms[client.ID] {
 		if room == r {
 			s.joinedRooms[client.ID] = append(s.joinedRooms[client.ID][:i], s.joinedRooms[client.ID][i+1:]...)
@@ -109,39 +109,39 @@ func (s *Server) RemoveClient(client *Client, r string) {
 			}
 		}
 	}
-	s.joinedRoomsLock.Unlock()
+	s.joinedRoomsMu.Unlock()
 
 }
 
 //Send all clients in room room data
 func (s *Server) Broadcast(room string, data string) {
-	s.roomsLock.RLock()
+	s.roomsMu.RLock()
 	for _, client := range s.rooms[room] {
 		//log.Printf("sending to %s in room %s\n", client.id, room)
 		go func(c *Client) {
 			c.Emit(data)
 		}(client)
 	}
-	s.roomsLock.RUnlock()
+	s.roomsMu.RUnlock()
 }
 
 func (s *Server) BroadcastJSON(room string, v interface{}) {
-	s.roomsLock.RLock()
+	s.roomsMu.RLock()
 	for _, client := range s.rooms[room] {
 		//log.Printf("sending to %s %s\n", client.id, room)
 		go func(c *Client) {
 			c.EmitJSON(v)
 		}(client)
 	}
-	s.roomsLock.RUnlock()
+	s.roomsMu.RUnlock()
 }
 
 //Returns a map of room name -> number of clients
 func (s *Server) Rooms() map[string]int {
 	rooms := make(map[string]int)
 
-	s.roomsLock.RLock()
-	defer s.roomsLock.RUnlock()
+	s.roomsMu.RLock()
+	defer s.roomsMu.RUnlock()
 	for room, clients := range s.rooms {
 		rooms[room] = len(clients)
 	}
@@ -152,8 +152,8 @@ func (s *Server) Rooms() map[string]int {
 //Returns an array of rooms the client c has been added to
 func (s *Server) RoomsJoined(id string) []string {
 	rooms := make([]string, len(s.joinedRooms[id]))
-	s.joinedRoomsLock.RLock()
-	defer s.joinedRoomsLock.RUnlock()
+	s.joinedRoomsMu.RLock()
+	defer s.joinedRoomsMu.RUnlock()
 
 	copy(rooms, s.joinedRooms[id])
 
