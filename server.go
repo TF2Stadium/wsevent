@@ -11,7 +11,33 @@ import (
 	"sync"
 )
 
-type Handler func(*Client, []byte) interface{}
+type Handler func(*Client, interface{}) interface{}
+
+//ServerCodec implements a codec for reading method/event names and their parameters.
+type ServerCodec interface {
+	//ReadName reads the received data and returns the method/event name
+	ReadName([]byte) string
+	//Unmarshal reads the recieved paramters in the provided object, and returns errors
+	//if (any) while unmarshaling, which is then sent a reply
+	Unmarshal([]byte, interface{}) error
+	//MarshalError marshals the error returned by Unmarshal
+	MarshalError(error) []byte
+}
+
+func (s *Server) call(client *Client, f reflect.Value, data []byte) (interface{}, error) {
+	//praams is a pointer to the parameter struct for the handler
+	params := reflect.New(f.Type().In(1))
+	err := s.codec.Unmarshal(data, params.Interface())
+	if err != nil {
+		return nil, err
+	}
+
+	in := []reflect.Value{
+		reflect.ValueOf(client),
+		reflect.Indirect(params)}
+	out := f.Call(in)
+	return out[0].Interface(), nil
+}
 
 //Server
 type Server struct {
@@ -23,24 +49,22 @@ type Server struct {
 	joinedRooms   map[string][]string
 	joinedRoomsMu *sync.RWMutex
 
-	//The extractor function reads the byte array and the message type
-	//and returns the event represented by the message.
-	Extractor func([]byte) string
 	//Called when the websocket connection closes. The disconnected client's
 	//session ID is sent as an argument
 	OnDisconnect func(string)
 	//Called when no event handler for a specific event exists
 	DefaultHandler Handler
 
-	handlers     map[string]Handler
+	handlers     map[string]reflect.Value
 	handlersLock *sync.RWMutex
 
 	newClient chan *Client
 	stop      chan struct{}
+	codec     ServerCodec
 }
 
 //Return a new server object
-func NewServer() *Server {
+func NewServer(codec ServerCodec) *Server {
 	s := &Server{
 		rooms:   make(map[string]([]*Client)),
 		roomsMu: new(sync.RWMutex),
@@ -49,11 +73,12 @@ func NewServer() *Server {
 		joinedRooms:   make(map[string][]string),
 		joinedRoomsMu: new(sync.RWMutex),
 
-		handlers:     make(map[string]Handler),
+		handlers:     make(map[string]reflect.Value),
 		handlersLock: new(sync.RWMutex),
 
 		newClient: make(chan *Client),
 		stop:      make(chan struct{}),
+		codec:     codec,
 	}
 
 	go s.listener()
@@ -177,7 +202,7 @@ func (s *Server) listener() {
 //The client from which the message was received and the string message itself.
 func (s *Server) On(event string, f Handler) {
 	s.handlersLock.Lock()
-	s.handlers[event] = f
+	s.handlers[event] = reflect.ValueOf(f)
 	s.handlersLock.Unlock()
 }
 
@@ -190,23 +215,17 @@ type Receiver interface {
 //Similar to net/rpc's Register, expect that rcvr needs to implement the
 //Receiver interface
 func (s *Server) Register(rcvr Receiver) {
+	rvalue := reflect.ValueOf(rcvr)
 	rtype := reflect.TypeOf(rcvr)
 
-	for i := 0; i < rtype.NumMethod(); i++ {
-		method := rtype.Method(i)
-		if method.Name == "Name" {
+	for i := 0; i < rvalue.NumMethod(); i++ {
+		method := rvalue.Method(i)
+		if rtype.Method(i).Name == "Name" {
 			continue
 		}
 
-		s.On(rcvr.Name(method.Name), func(c *Client, b []byte) interface{} {
-			in := []reflect.Value{
-				reflect.ValueOf(rcvr),
-				reflect.ValueOf(c),
-				reflect.ValueOf(b)}
-
-			rtrn := method.Func.Call(in)
-			return rtrn[0].Interface()
-		})
-
+		s.handlersLock.Lock()
+		s.handlers[rcvr.Name(rtype.Method(i).Name)] = method
+		s.handlersLock.Unlock()
 	}
 }

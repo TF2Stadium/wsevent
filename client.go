@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"sync"
 	"time"
 
@@ -19,6 +20,7 @@ type Client struct {
 
 	writeMu *sync.Mutex
 	conn    *ws.Conn
+	server  *Server
 }
 
 type request struct {
@@ -55,6 +57,7 @@ func (s *Server) NewClientWithID(upgrader ws.Upgrader, w http.ResponseWriter, r 
 
 		writeMu: new(sync.Mutex),
 		conn:    conn,
+		server:  s,
 	}
 	s.newClient <- client
 
@@ -68,8 +71,11 @@ func (s *Server) NewClient(upgrader ws.Upgrader, w http.ResponseWriter, r *http.
 //A thread-safe variant of WriteMessage
 func (c *Client) Emit(data string) {
 	c.writeMu.Lock()
-	c.conn.WriteMessage(ws.TextMessage, []byte(data))
+	err := c.conn.WriteMessage(ws.TextMessage, []byte(data))
 	c.writeMu.Unlock()
+	if err != nil {
+		c.cleanup(c.server)
+	}
 }
 
 type emitJS struct {
@@ -89,8 +95,11 @@ func (c *Client) EmitJSON(v interface{}) error {
 	}
 
 	c.writeMu.Lock()
-	c.conn.WriteMessage(ws.TextMessage, bytes)
+	err = c.conn.WriteMessage(ws.TextMessage, bytes)
 	c.writeMu.Unlock()
+	if err != nil {
+		c.cleanup(c.server)
+	}
 	return nil
 }
 
@@ -156,29 +165,33 @@ func (c *Client) listener(s *Server) {
 				continue
 			}
 
-			callName := s.Extractor(req.Data)
+			callName := s.codec.ReadName(req.Data)
 
 			s.handlersLock.RLock()
 			f, ok := s.handlers[callName]
 			s.handlersLock.RUnlock()
 
 			if !ok {
-				if s.DefaultHandler != nil {
-					f = s.DefaultHandler
-					goto call
+				if s.DefaultHandler == nil {
+					continue
 				}
-				continue
+				f = reflect.ValueOf(s.DefaultHandler)
 			}
-		call:
+
 			go func() {
+				var err error
+
 				reply := replyPool.Get().(reply)
 				reply.Id = req.Id
-				reply.Data = f(c, req.Data)
+				reply.Data, err = s.call(c, f, req.Data)
 
 				bytes, _ := json.Marshal(reply)
 				c.writeMu.Lock()
-				c.conn.WriteMessage(ws.TextMessage, bytes)
+				err = c.conn.WriteMessage(ws.TextMessage, bytes)
 				c.writeMu.Unlock()
+				if err != nil {
+					c.cleanup(c.server)
+				}
 				reqPool.Put(req)
 				replyPool.Put(reply)
 			}()
