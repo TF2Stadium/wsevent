@@ -27,8 +27,31 @@ func connect(URL string) (*websocket.Conn, error) {
 	return conn, err
 }
 
+type JSONCodec struct{}
+
+func (JSONCodec) ReadName(data []byte) string {
+	var body struct {
+		Request string
+	}
+	json.Unmarshal(data, &body)
+	return body.Request
+}
+
+func (JSONCodec) Unmarshal(data []byte, v interface{}) error {
+	return json.Unmarshal(data, v)
+}
+
+func (JSONCodec) MarshalError(err error) []byte {
+	e := map[string]string{
+		"error": err.Error(),
+	}
+
+	bytes, _ := json.Marshal(e)
+	return bytes
+}
+
 func TestNewServer(t *testing.T) {
-	s := NewServer()
+	s := NewServer(JSONCodec{})
 	defer s.Close()
 	if s == nil {
 		t.Fatal("NewServer retuning nil")
@@ -36,7 +59,7 @@ func TestNewServer(t *testing.T) {
 }
 
 func TestClient(t *testing.T) {
-	server := NewServer()
+	server := NewServer(JSONCodec{})
 	defer server.Close()
 	room := "0"
 
@@ -111,12 +134,9 @@ func TestClient(t *testing.T) {
 
 type TestObject struct{}
 
-func (TestObject) Add(so *Client, data []byte) interface{} {
-	var args struct {
-		A, B int
-	}
-
-	json.Unmarshal(data, &args)
+func (TestObject) Add(so *Client, args struct {
+	A, B int
+}) interface{} {
 
 	return struct {
 		Result int `json:"result"`
@@ -128,13 +148,7 @@ func (TestObject) Name(_ string) string {
 }
 
 func TestHandler(t *testing.T) {
-	server := NewServer()
-	server.Extractor = func(data []byte) string {
-		req := make(map[string]interface{})
-		json.Unmarshal(data, &req)
-		return req["request"].(string)
-	}
-
+	server := NewServer(JSONCodec{})
 	defer server.Close()
 
 	var client *Client
@@ -167,16 +181,6 @@ func TestHandler(t *testing.T) {
 	}
 
 	server.Register(TestObject{})
-	server.On("subtract", func(_ *Client, data []byte) interface{} {
-		var args struct {
-			A, B int
-		}
-		json.Unmarshal(data, &args)
-
-		return struct {
-			Result int `json:"result"`
-		}{args.A - args.B}
-	})
 
 	args := map[string]interface{}{
 		"id": "1",
@@ -202,28 +206,6 @@ func TestHandler(t *testing.T) {
 	}
 
 	if data["result"].(float64) != 3 {
-		t.Fatalf("Result not valid: %v\n", reply)
-		return
-	}
-
-	args = map[string]interface{}{
-		"id": "1",
-		"data": map[string]interface{}{
-			"request": "subtract",
-			"A":       2,
-			"B":       1,
-		},
-	}
-	conn.WriteJSON(args)
-
-	err = conn.ReadJSON(&reply)
-	data, ok = reply["data"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("Received invalid reply: %v\n", reply)
-		return
-	}
-
-	if data["result"].(float64) != 1 {
 		t.Fatalf("Result not valid: %v\n", reply)
 		return
 	}
