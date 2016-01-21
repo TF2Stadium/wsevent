@@ -172,10 +172,10 @@ func (c *Client) listener(s *Server) {
 			s.handlersLock.RUnlock()
 
 			if !ok {
-				if s.DefaultHandler == nil {
+				if s.defaultHandler.Kind() == reflect.Invalid {
 					continue
 				}
-				f = reflect.ValueOf(s.DefaultHandler)
+				f = s.defaultHandler
 			}
 
 			go func() {

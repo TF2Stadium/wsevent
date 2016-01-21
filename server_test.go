@@ -51,7 +51,7 @@ func (JSONCodec) MarshalError(err error) []byte {
 }
 
 func TestNewServer(t *testing.T) {
-	s := NewServer(JSONCodec{})
+	s := NewServer(JSONCodec{}, func() {})
 	defer s.Close()
 	if s == nil {
 		t.Fatal("NewServer retuning nil")
@@ -59,7 +59,7 @@ func TestNewServer(t *testing.T) {
 }
 
 func TestClient(t *testing.T) {
-	server := NewServer(JSONCodec{})
+	server := NewServer(JSONCodec{}, func() {})
 	defer server.Close()
 	room := "0"
 
@@ -148,7 +148,7 @@ func (TestObject) Name(_ string) string {
 }
 
 func TestHandler(t *testing.T) {
-	server := NewServer(JSONCodec{})
+	server := NewServer(JSONCodec{}, func() {})
 	defer server.Close()
 
 	var client *Client

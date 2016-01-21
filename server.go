@@ -52,19 +52,18 @@ type Server struct {
 	//Called when the websocket connection closes. The disconnected client's
 	//session ID is sent as an argument
 	OnDisconnect func(string)
-	//Called when no event handler for a specific event exists
-	DefaultHandler Handler
 
 	handlers     map[string]reflect.Value
 	handlersLock *sync.RWMutex
 
-	newClient chan *Client
-	stop      chan struct{}
-	codec     ServerCodec
+	newClient      chan *Client
+	stop           chan struct{}
+	codec          ServerCodec
+	defaultHandler reflect.Value
 }
 
 //Return a new server object
-func NewServer(codec ServerCodec) *Server {
+func NewServer(codec ServerCodec, defaultHandler interface{}) *Server {
 	s := &Server{
 		rooms:   make(map[string]([]*Client)),
 		roomsMu: new(sync.RWMutex),
@@ -76,9 +75,10 @@ func NewServer(codec ServerCodec) *Server {
 		handlers:     make(map[string]reflect.Value),
 		handlersLock: new(sync.RWMutex),
 
-		newClient: make(chan *Client),
-		stop:      make(chan struct{}),
-		codec:     codec,
+		newClient:      make(chan *Client),
+		stop:           make(chan struct{}),
+		codec:          codec,
+		defaultHandler: reflect.ValueOf(defaultHandler),
 	}
 
 	go s.listener()
