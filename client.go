@@ -17,11 +17,8 @@ type Client struct {
 	ID      string
 	Request *http.Request
 
-	conn *ws.Conn
-	send chan []byte
-	recv chan []byte
-
-	close chan struct{}
+	writeMu *sync.Mutex
+	conn    *ws.Conn
 }
 
 type request struct {
@@ -56,11 +53,8 @@ func (s *Server) NewClientWithID(upgrader ws.Upgrader, w http.ResponseWriter, r 
 		ID:      id,
 		Request: r,
 
-		conn: conn,
-		send: make(chan []byte),
-		recv: make(chan []byte),
-
-		close: make(chan struct{}, 3),
+		writeMu: new(sync.Mutex),
+		conn:    conn,
 	}
 	s.newClient <- client
 
@@ -73,7 +67,9 @@ func (s *Server) NewClient(upgrader ws.Upgrader, w http.ResponseWriter, r *http.
 
 //A thread-safe variant of WriteMessage
 func (c *Client) Emit(data string) {
-	c.send <- []byte(data)
+	c.writeMu.Lock()
+	c.conn.WriteMessage(ws.TextMessage, []byte(data))
+	c.writeMu.Unlock()
 }
 
 type emitJS struct {
@@ -92,15 +88,13 @@ func (c *Client) EmitJSON(v interface{}) error {
 		return err
 	}
 
-	c.send <- bytes
+	c.writeMu.Lock()
+	c.conn.WriteMessage(ws.TextMessage, bytes)
+	c.writeMu.Unlock()
 	return nil
 }
 
 func (c *Client) Close() {
-	for i := 0; i < 3; i++ {
-		c.close <- struct{}{}
-	}
-
 	c.conn.Close()
 }
 
@@ -139,45 +133,19 @@ func (c *Client) cleanup(s *Server) {
 
 func (c *Client) listener(s *Server) {
 	tick := time.NewTicker(time.Millisecond * 10)
-	go func() {
-		for {
-			select {
-			case data := <-c.send:
-				c.conn.WriteMessage(ws.TextMessage, data)
-
-			case <-c.close:
-				return
-			}
-		}
-	}()
-	go func() {
-		for {
-			select {
-			case <-tick.C:
-				mtype, data, err := c.conn.ReadMessage()
-				if err != nil {
-					c.cleanup(s)
-					c.recv <- []byte{}
-					c.close <- struct{}{}
-					c.close <- struct{}{}
-					tick.Stop()
-					return
-				}
-				if mtype != ws.TextMessage {
-					continue
-				}
-
-				c.recv <- data
-
-			case <-c.close:
-				return
-			}
-		}
-	}()
-
 	for {
 		select {
-		case data := <-c.recv:
+		case <-tick.C:
+			mtype, data, err := c.conn.ReadMessage()
+			if err != nil {
+				c.cleanup(s)
+				tick.Stop()
+				return
+			}
+			if mtype != ws.TextMessage {
+				continue
+			}
+
 			if len(data) == 0 {
 				return
 			}
@@ -203,20 +171,18 @@ func (c *Client) listener(s *Server) {
 			}
 		call:
 			go func() {
-				rtrn := f(c, req.Data)
 				reply := replyPool.Get().(reply)
 				reply.Id = req.Id
-				reply.Data = rtrn
+				reply.Data = f(c, req.Data)
 
 				bytes, _ := json.Marshal(reply)
-				c.send <- bytes
-
+				c.writeMu.Lock()
+				c.conn.WriteMessage(ws.TextMessage, bytes)
+				c.writeMu.Unlock()
 				reqPool.Put(req)
 				replyPool.Put(reply)
 			}()
 
-		case <-c.close:
-			return
 		}
 	}
 }
