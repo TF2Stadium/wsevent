@@ -20,8 +20,8 @@ type ServerCodec interface {
 	//Unmarshal reads the recieved paramters in the provided object, and returns errors
 	//if (any) while unmarshaling, which is then sent a reply
 	Unmarshal([]byte, interface{}) error
-	//MarshalError marshals the error returned by Unmarshal
-	MarshalError(error) []byte
+	//Error wraps the error returned by Unmarshal into a json-marshalable object
+	Error(error) interface{}
 }
 
 func (s *Server) call(client *Client, f reflect.Value, data []byte) (interface{}, error) {
@@ -64,6 +64,9 @@ type Server struct {
 
 //Return a new server object
 func NewServer(codec ServerCodec, defaultHandler interface{}) *Server {
+	value := reflect.ValueOf(defaultHandler)
+	verifyHandler(value, reflect.TypeOf(defaultHandler).Name(), "NewServer")
+
 	s := &Server{
 		rooms:   make(map[string]([]*Client)),
 		roomsMu: new(sync.RWMutex),
@@ -201,8 +204,11 @@ func (s *Server) listener() {
 //Registers a callback for the event string. The callback must take 2 arguments,
 //The client from which the message was received and the string message itself.
 func (s *Server) On(event string, f Handler) {
+	value := reflect.ValueOf(f)
+
+	verifyHandler(value, reflect.TypeOf(f).Name(), "On")
 	s.handlersLock.Lock()
-	s.handlers[event] = reflect.ValueOf(f)
+	s.handlers[event] = value
 	s.handlersLock.Unlock()
 }
 
@@ -220,12 +226,30 @@ func (s *Server) Register(rcvr Receiver) {
 
 	for i := 0; i < rvalue.NumMethod(); i++ {
 		method := rvalue.Method(i)
-		if rtype.Method(i).Name == "Name" {
+		name := rtype.Method(i).Name
+		if name == "Name" {
 			continue
 		}
 
+		verifyHandler(method, name, "Register")
+
 		s.handlersLock.Lock()
-		s.handlers[rcvr.Name(rtype.Method(i).Name)] = method
+		s.handlers[rcvr.Name(name)] = method
 		s.handlersLock.Unlock()
+	}
+}
+
+func verifyHandler(method reflect.Value, name, prefix string) {
+	if method.Type().NumIn() != 2 {
+		panic(prefix + ": method " + name + " doesn't have only 2 arguments")
+	}
+	if method.Type().NumOut() != 1 {
+		panic(prefix + ": method " + name + " doesn't have 1 return value")
+	}
+	if method.Type().In(0) != reflect.TypeOf(&Client{}) {
+		panic(prefix + ": method " + name + " doesn't have *Client as first argument")
+	}
+	if method.Type().In(1).Kind() != reflect.Struct {
+		panic(prefix + ": method " + name + " doesn't have struct as second argument")
 	}
 }
