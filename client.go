@@ -180,12 +180,17 @@ func (c *Client) listener(s *Server) {
 
 			go func() {
 				var err error
+				var bytes []byte
 
 				reply := replyPool.Get().(reply)
 				reply.Id = req.Id
 				reply.Data, err = s.call(c, f, req.Data)
+				if err != nil {
+					reply.Data = s.codec.Error(err)
+				}
 
-				bytes, _ := json.Marshal(reply)
+				bytes, _ = json.Marshal(reply)
+
 				c.writeMu.Lock()
 				err = c.conn.WriteMessage(ws.TextMessage, bytes)
 				c.writeMu.Unlock()
