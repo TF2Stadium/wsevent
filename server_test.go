@@ -148,7 +148,13 @@ func (TestObject) Name(_ string) string {
 }
 
 func TestHandler(t *testing.T) {
-	server := NewServer(JSONCodec{}, func() {})
+	var called bool
+	wait := new(sync.WaitGroup)
+	server := NewServer(JSONCodec{}, func(_ *Client, _ struct{}) interface{} {
+		called = true
+		wait.Done()
+		return struct{}{}
+	})
 	defer server.Close()
 
 	var client *Client
@@ -207,6 +213,17 @@ func TestHandler(t *testing.T) {
 
 	if data["result"].(float64) != 3 {
 		t.Fatalf("Result not valid: %v\n", reply)
+		return
+	}
+
+	//test default handler
+	wait.Add(1)
+	args["data"].(map[string]interface{})["request"] = "foobar"
+	conn.WriteJSON(args)
+
+	wait.Wait()
+	if !called {
+		t.Fatalf("Default handler not called!")
 		return
 	}
 }
