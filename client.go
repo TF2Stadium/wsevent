@@ -1,6 +1,7 @@
 package wsevent
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -12,11 +13,10 @@ import (
 	ws "github.com/gorilla/websocket"
 )
 
-//Client
+//Client represents a server-side client
 type Client struct {
-	//Session ID
-	ID      string
-	Request *http.Request
+	ID      string        //Session ID
+	Request *http.Request //http Request when connection was upgraded
 
 	writeMu *sync.Mutex
 	conn    *ws.Conn
@@ -24,25 +24,26 @@ type Client struct {
 }
 
 type request struct {
-	Id   string
-	Data json.RawMessage
+	ID   string          `json:"id"`
+	Data json.RawMessage `json:"data"`
+
+	next *request
 }
 
 type reply struct {
-	Id   string      `json:"id"`
+	ID   string      `json:"id"`
 	Data interface{} `json:"data"`
+
+	next *reply
 }
 
-var (
-	reqPool   = &sync.Pool{New: func() interface{} { return request{} }}
-	replyPool = &sync.Pool{New: func() interface{} { return reply{} }}
-)
+func genID(r *http.Request) string {
+	buff := make([]byte, 5)
+	rand.Read(buff)
+	b := bytes.NewBuffer(buff)
+	b.WriteString(r.RemoteAddr)
 
-func genID() string {
-	bytes := make([]byte, 32)
-	rand.Read(bytes)
-
-	return base64.URLEncoding.EncodeToString(bytes)
+	return base64.URLEncoding.EncodeToString(b.Bytes())
 }
 
 func (s *Server) NewClientWithID(upgrader ws.Upgrader, w http.ResponseWriter, r *http.Request, id string) (*Client, error) {
@@ -66,17 +67,14 @@ func (s *Server) NewClientWithID(upgrader ws.Upgrader, w http.ResponseWriter, r 
 }
 
 func (s *Server) NewClient(upgrader ws.Upgrader, w http.ResponseWriter, r *http.Request) (*Client, error) {
-	return s.NewClientWithID(upgrader, w, r, genID())
+	return s.NewClientWithID(upgrader, w, r, genID(r))
 }
 
 //A thread-safe variant of WriteMessage
 func (c *Client) Emit(data string) {
 	c.writeMu.Lock()
-	err := c.conn.WriteMessage(ws.TextMessage, []byte(data))
+	c.conn.WriteMessage(ws.TextMessage, []byte(data))
 	c.writeMu.Unlock()
-	if err != nil {
-		c.cleanup(c.server)
-	}
 }
 
 type emitJS struct {
@@ -95,12 +93,7 @@ func (c *Client) EmitJSON(v interface{}) error {
 		return err
 	}
 
-	c.writeMu.Lock()
-	err = c.conn.WriteMessage(ws.TextMessage, bytes)
-	c.writeMu.Unlock()
-	if err != nil {
-		c.cleanup(c.server)
-	}
+	c.Emit(string(bytes))
 	return nil
 }
 
@@ -144,64 +137,50 @@ func (c *Client) cleanup(s *Server) {
 func (c *Client) listener(s *Server) {
 	tick := time.NewTicker(time.Millisecond * 10)
 	for {
-		select {
-		case <-tick.C:
-			mtype, data, err := c.conn.ReadMessage()
-			if err != nil {
-				c.cleanup(s)
-				tick.Stop()
-				return
-			}
-			if mtype != ws.TextMessage {
-				continue
-			}
-
-			if len(data) == 0 {
-				return
-			}
-
-			req := reqPool.Get().(request)
-
-			if err := json.Unmarshal(data, &req); err != nil {
-				continue
-			}
-
-			callName := s.codec.ReadName(req.Data)
-
-			s.handlersLock.RLock()
-			f, ok := s.handlers[callName]
-			s.handlersLock.RUnlock()
-
-			if !ok {
-				if s.defaultHandler.Kind() == reflect.Invalid {
-					continue
-				}
-				f = s.defaultHandler
-			}
-
-			go func() {
-				var err error
-				var bytes []byte
-
-				reply := replyPool.Get().(reply)
-				reply.Id = req.Id
-				reply.Data, err = s.call(c, f, req.Data)
-				if err != nil {
-					reply.Data = s.codec.Error(err)
-				}
-
-				bytes, _ = json.Marshal(reply)
-
-				c.writeMu.Lock()
-				err = c.conn.WriteMessage(ws.TextMessage, bytes)
-				c.writeMu.Unlock()
-				if err != nil {
-					c.cleanup(c.server)
-				}
-				reqPool.Put(req)
-				replyPool.Put(reply)
-			}()
-
+		<-tick.C
+		_, data, err := c.conn.ReadMessage()
+		if err != nil {
+			c.cleanup(s)
+			tick.Stop()
+			return
 		}
+
+		req := s.getRequest()
+
+		if err := json.Unmarshal(data, &req); err != nil {
+			continue
+		}
+
+		callName := s.codec.ReadName(req.Data)
+
+		s.handlersLock.RLock()
+		f, ok := s.handlers[callName]
+		s.handlersLock.RUnlock()
+
+		if !ok {
+			if s.defaultHandler.Kind() == reflect.Invalid {
+				continue
+			}
+			f = s.defaultHandler
+		}
+
+		go func() {
+			var err error
+			var bytes []byte
+
+			reply := s.getReply()
+			reply.ID = req.ID
+			reply.Data, err = s.call(c, f, req.Data)
+			if err != nil {
+				reply.Data = s.codec.Error(err)
+			}
+
+			bytes, _ = json.Marshal(reply)
+
+			c.Emit(string(bytes))
+			s.freeRequest(req)
+			s.freeReply(reply)
+		}()
+
 	}
 }
