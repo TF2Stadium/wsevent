@@ -41,6 +41,10 @@ func (JSONCodec) Unmarshal(data []byte, v interface{}) error {
 	return json.Unmarshal(data, v)
 }
 
+func (JSONCodec) Error(err error) interface{} {
+	return err
+}
+
 func (JSONCodec) MarshalError(err error) []byte {
 	e := map[string]string{
 		"error": err.Error(),
@@ -50,17 +54,17 @@ func (JSONCodec) MarshalError(err error) []byte {
 	return bytes
 }
 
+func defaultHandler(*Client, struct{}) interface{} { return "" }
+
 func TestNewServer(t *testing.T) {
-	s := NewServer(JSONCodec{}, func() {})
-	defer s.Close()
+	s := NewServer(JSONCodec{}, defaultHandler)
 	if s == nil {
 		t.Fatal("NewServer retuning nil")
 	}
 }
 
 func TestClient(t *testing.T) {
-	server := NewServer(JSONCodec{}, func() {})
-	defer server.Close()
+	server := NewServer(JSONCodec{}, defaultHandler)
 	room := "0"
 
 	var client *Client
@@ -78,7 +82,7 @@ func TestClient(t *testing.T) {
 			t.Fatal("client is nil")
 		}
 
-		server.AddClient(client, room)
+		server.Join(client, room)
 		wg.Done()
 	})
 
@@ -118,7 +122,7 @@ func TestClient(t *testing.T) {
 		t.Fatalf("Received the wrong data: %s", string(data))
 	}
 
-	server.RemoveClient(client, room)
+	server.Leave(client, room)
 	server.Broadcast(room, "test")
 
 	_, data, err = conn.ReadMessage()
@@ -143,7 +147,7 @@ func (TestObject) Add(so *Client, args struct {
 	}{args.A + args.B}
 }
 
-func (TestObject) Name(_ string) string {
+func (TestObject) Name(n string) string {
 	return "add"
 }
 
@@ -155,7 +159,6 @@ func TestHandler(t *testing.T) {
 		wait.Done()
 		return struct{}{}
 	})
-	defer server.Close()
 
 	var client *Client
 	wg := new(sync.WaitGroup)
