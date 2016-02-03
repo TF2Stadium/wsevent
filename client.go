@@ -59,7 +59,8 @@ func (s *Server) NewClientWithID(upgrader ws.Upgrader, w http.ResponseWriter, r 
 		conn:    conn,
 		server:  s,
 	}
-	s.newClient <- client
+
+	go client.listener(s)
 
 	return client, nil
 }

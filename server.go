@@ -11,8 +11,6 @@ import (
 	"sync"
 )
 
-type Handler func(*Client, interface{}) interface{}
-
 //ServerCodec implements a codec for reading method/event names and their parameters.
 type ServerCodec interface {
 	//ReadName reads the received data and returns the method/event name
@@ -56,8 +54,6 @@ type Server struct {
 	handlers     map[string]reflect.Value
 	handlersLock *sync.RWMutex
 
-	newClient      chan *Client
-	stop           chan struct{}
 	codec          ServerCodec
 	defaultHandler reflect.Value
 }
@@ -78,18 +74,11 @@ func NewServer(codec ServerCodec, defaultHandler interface{}) *Server {
 		handlers:     make(map[string]reflect.Value),
 		handlersLock: new(sync.RWMutex),
 
-		newClient:      make(chan *Client),
-		stop:           make(chan struct{}),
 		codec:          codec,
 		defaultHandler: reflect.ValueOf(defaultHandler),
 	}
 
-	go s.listener()
 	return s
-}
-
-func (s *Server) Close() {
-	s.stop <- struct{}{}
 }
 
 //Add a client c to room r
@@ -190,20 +179,10 @@ func (s *Server) RoomsJoined(id string) []string {
 
 	return rooms
 }
-func (s *Server) listener() {
-	for {
-		select {
-		case c := <-s.newClient:
-			go c.listener(s)
-		case <-s.stop:
-			return
-		}
-	}
-}
 
 //Registers a callback for the event string. The callback must take 2 arguments,
 //The client from which the message was received and the string message itself.
-func (s *Server) On(event string, f Handler) {
+func (s *Server) On(event string, f interface{}) {
 	value := reflect.ValueOf(f)
 
 	verifyHandler(value, reflect.TypeOf(f).Name(), "On")
@@ -239,17 +218,9 @@ func (s *Server) Register(rcvr Receiver) {
 	}
 }
 
-func verifyHandler(method reflect.Value, name, prefix string) {
-	if method.Type().NumIn() != 2 {
-		panic(prefix + ": method " + name + " doesn't have only 2 arguments")
-	}
-	if method.Type().NumOut() != 1 {
-		panic(prefix + ": method " + name + " doesn't have 1 return value")
-	}
-	if method.Type().In(0) != reflect.TypeOf(&Client{}) {
-		panic(prefix + ": method " + name + " doesn't have *Client as first argument")
-	}
-	if method.Type().In(1).Kind() != reflect.Struct {
-		panic(prefix + ": method " + name + " doesn't have struct as second argument")
-	}
+func verifyHandler(method reflect.Value, name, prefix string) bool {
+	return method.Type().NumIn() != 2 &&
+		method.Type().NumOut() != 1 &&
+		method.Type().In(0) != reflect.TypeOf(&Client{}) &&
+		method.Type().In(1).Kind() != reflect.Struct
 }
