@@ -63,6 +63,9 @@ type Server struct {
 
 	replyMu *sync.Mutex
 	freeRep *reply
+
+	// Used to wait for all requests to complete
+	Requests *sync.WaitGroup
 }
 
 func (s *Server) getRequest() *request {
@@ -131,6 +134,8 @@ func NewServer(codec ServerCodec, defaultHandler interface{}) *Server {
 
 		reqMu:   new(sync.Mutex),
 		replyMu: new(sync.Mutex),
+
+		Requests: new(sync.WaitGroup),
 	}
 
 	return s

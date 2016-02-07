@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
-	"reflect"
 	"sync"
 	"time"
 
@@ -158,12 +157,13 @@ func (c *Client) listener(s *Server) {
 		s.handlersLock.RUnlock()
 
 		if !ok {
-			if s.defaultHandler.Kind() == reflect.Invalid {
+			if s.defaultHandler.IsNil() {
 				continue
 			}
 			f = s.defaultHandler
 		}
 
+		s.Requests.Add(1)
 		go func() {
 			var err error
 			var bytes []byte
@@ -180,6 +180,7 @@ func (c *Client) listener(s *Server) {
 			c.Emit(string(bytes))
 			s.freeRequest(req)
 			s.freeReply(reply)
+			s.Requests.Done()
 		}()
 
 	}
