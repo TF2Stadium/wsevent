@@ -174,13 +174,13 @@ func (c *Client) listener(s *Server) {
 			if err != nil {
 				reply.Data = s.codec.Error(err)
 			}
+			s.Requests.Done()
 
 			bytes, _ = json.Marshal(reply)
 
 			c.Emit(string(bytes))
 			s.freeRequest(req)
 			s.freeReply(reply)
-			s.Requests.Done()
 		}()
 
 	}
