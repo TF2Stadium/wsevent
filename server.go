@@ -34,8 +34,10 @@ func (s *Server) call(client *Client, f reflect.Value, data []byte) (interface{}
 	in := []reflect.Value{
 		reflect.ValueOf(client),
 		reflect.Indirect(params)}
-	out := f.Call(in)
-	return out[0].Interface(), nil
+	out := f.Call(in)[0].Interface()
+	err, _ = out.(error)
+
+	return out, err
 }
 
 //Server represents an RPC server
