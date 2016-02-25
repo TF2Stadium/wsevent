@@ -10,6 +10,8 @@ import (
 	"log"
 	"reflect"
 	"sync"
+
+	"github.com/dgrijalva/jwt-go"
 )
 
 //ServerCodec implements a codec for reading method/event names and their parameters.
@@ -52,7 +54,7 @@ type Server struct {
 
 	//Called when the websocket connection closes. The disconnected client's
 	//session ID is sent as an argument
-	OnDisconnect func(string)
+	OnDisconnect func(string, *jwt.Token)
 
 	handlers     map[string]reflect.Value
 	handlersLock *sync.RWMutex

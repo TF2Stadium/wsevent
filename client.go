@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dgrijalva/jwt-go"
 	ws "github.com/gorilla/websocket"
 )
 
@@ -16,6 +17,7 @@ import (
 type Client struct {
 	ID      string        //Session ID
 	Request *http.Request //http Request when connection was upgraded
+	Token   *jwt.Token    //if any
 
 	writeMu *sync.Mutex
 	conn    *ws.Conn
@@ -129,7 +131,7 @@ func (c *Client) cleanup(s *Server) {
 	s.joinedRoomsMu.Unlock()
 
 	if s.OnDisconnect != nil {
-		s.OnDisconnect(c.ID)
+		s.OnDisconnect(c.ID, c.Token)
 	}
 }
 
