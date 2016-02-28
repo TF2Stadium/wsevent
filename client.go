@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
@@ -22,6 +23,7 @@ type Client struct {
 	writeMu *sync.Mutex
 	conn    *ws.Conn
 	server  *Server
+	closed  *int32
 }
 
 type request struct {
@@ -60,6 +62,7 @@ func (s *Server) NewClientWithID(upgrader ws.Upgrader, w http.ResponseWriter, r 
 		writeMu: new(sync.Mutex),
 		conn:    conn,
 		server:  s,
+		closed:  new(int32),
 	}
 
 	go client.listener(s)
@@ -103,6 +106,11 @@ func (c *Client) Close() {
 }
 
 func (c *Client) cleanup(s *Server) {
+	if atomic.LoadInt32(c.closed) == 1 {
+		return
+	}
+
+	atomic.StoreInt32(c.closed, 1)
 	c.conn.Close()
 
 	s.joinedRoomsMu.RLock()
@@ -140,6 +148,10 @@ func (c *Client) listener(s *Server) {
 	for {
 		<-tick.C
 		_, data, err := c.conn.ReadMessage()
+		if atomic.LoadInt32(s.closed) == 1 {
+			return
+		}
+
 		if err != nil {
 			c.cleanup(s)
 			tick.Stop()
@@ -166,19 +178,16 @@ func (c *Client) listener(s *Server) {
 		}
 
 		s.Requests.Add(1)
+		reply := s.getReply()
+		reply.ID = req.ID
+		reply.Data, err = s.call(c, f, req.Data)
+		if err != nil {
+			reply.Data = s.codec.Error(err)
+		}
+		s.Requests.Done()
+
 		go func() {
-			var err error
-			var bytes []byte
-
-			reply := s.getReply()
-			reply.ID = req.ID
-			reply.Data, err = s.call(c, f, req.Data)
-			if err != nil {
-				reply.Data = s.codec.Error(err)
-			}
-			s.Requests.Done()
-
-			bytes, _ = json.Marshal(reply)
+			bytes, _ := json.Marshal(reply)
 
 			c.Emit(string(bytes))
 			s.freeRequest(req)

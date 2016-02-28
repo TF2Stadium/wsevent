@@ -10,6 +10,7 @@ import (
 	"log"
 	"reflect"
 	"sync"
+	"sync/atomic"
 
 	"github.com/dgrijalva/jwt-go"
 )
@@ -44,6 +45,7 @@ func (s *Server) call(client *Client, f reflect.Value, data []byte) (interface{}
 
 //Server represents an RPC server
 type Server struct {
+	closed *int32
 	//maps room string to a list of clients in it
 	rooms   map[string]([]*Client)
 	roomsMu *sync.RWMutex
@@ -123,6 +125,7 @@ func NewServer(codec ServerCodec, defaultHandler interface{}) *Server {
 	}
 
 	s := &Server{
+		closed:  new(int32),
 		rooms:   make(map[string]([]*Client)),
 		roomsMu: new(sync.RWMutex),
 
@@ -246,6 +249,19 @@ func (s *Server) RoomsJoined(id string) []string {
 	copy(rooms, s.joinedRooms[id])
 
 	return rooms
+}
+
+func (s *Server) Close() {
+	atomic.SwapInt32(s.closed, 1)
+
+	s.roomsMu.Lock()
+	for _, clients := range s.rooms {
+		for _, client := range clients {
+			atomic.StoreInt32(client.closed, 1)
+			client.Close()
+		}
+	}
+	s.roomsMu.Unlock()
 }
 
 //On Registers a callback for the event string. It panics if the callback isn't
