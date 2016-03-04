@@ -26,9 +26,9 @@ type ServerCodec interface {
 	Error(error) interface{}
 }
 
-func (s *Server) call(client *Client, f reflect.Value, data []byte) (interface{}, error) {
+func (s *Server) call(client *Client, f *regMethod, data []byte) (interface{}, error) {
 	//praams is a pointer to the parameter struct for the handler
-	params := reflect.New(f.Type().In(1))
+	params := reflect.New(f.paramType)
 	err := s.codec.Unmarshal(data, params.Interface())
 	if err != nil {
 		return nil, err
@@ -37,10 +37,16 @@ func (s *Server) call(client *Client, f reflect.Value, data []byte) (interface{}
 	in := []reflect.Value{
 		reflect.ValueOf(client),
 		reflect.Indirect(params)}
-	out := f.Call(in)[0].Interface()
+	out := f.method.Call(in)[0].Interface()
 	err, _ = out.(error)
 
 	return out, err
+}
+
+//represents a registered method
+type regMethod struct {
+	method    reflect.Value
+	paramType reflect.Type // second argument to method/handler
 }
 
 //Server represents an RPC server
@@ -58,11 +64,11 @@ type Server struct {
 	//session ID is sent as an argument
 	OnDisconnect func(string, *jwt.Token)
 
-	handlers     map[string]reflect.Value
+	handlers     map[string]*regMethod
 	handlersLock *sync.RWMutex
 
 	codec          ServerCodec
-	defaultHandler reflect.Value
+	defaultHandler *regMethod
 
 	reqMu   *sync.Mutex
 	freeReq *request
@@ -133,11 +139,11 @@ func NewServer(codec ServerCodec, defaultHandler interface{}) *Server {
 		joinedRooms:   make(map[string][]string),
 		joinedRoomsMu: new(sync.RWMutex),
 
-		handlers:     make(map[string]reflect.Value),
+		handlers:     make(map[string]*regMethod),
 		handlersLock: new(sync.RWMutex),
 
 		codec:          codec,
-		defaultHandler: reflect.ValueOf(defaultHandler),
+		defaultHandler: &regMethod{value, value.Type().In(1)},
 
 		reqMu:   new(sync.Mutex),
 		replyMu: new(sync.Mutex),
@@ -274,7 +280,7 @@ func (s *Server) On(event string, f interface{}) {
 	}
 
 	s.handlersLock.Lock()
-	s.handlers[event] = value
+	s.handlers[event] = &regMethod{value, value.Type().In(1)}
 	s.handlersLock.Unlock()
 }
 
@@ -302,7 +308,7 @@ func (s *Server) Register(rcvr Receiver) {
 		}
 
 		s.handlersLock.Lock()
-		s.handlers[rcvr.Name(name)] = method
+		s.handlers[rcvr.Name(name)] = &regMethod{method, method.Type().In(1)}
 		s.handlersLock.Unlock()
 	}
 }

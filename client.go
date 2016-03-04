@@ -171,7 +171,7 @@ func (c *Client) listener(s *Server) {
 		s.handlersLock.RUnlock()
 
 		if !ok {
-			if s.defaultHandler.IsNil() {
+			if s.defaultHandler == nil {
 				continue
 			}
 			f = s.defaultHandler
