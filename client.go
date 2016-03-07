@@ -170,17 +170,24 @@ func (c *Client) listener(s *Server) {
 		f, ok := s.handlers[callName]
 		s.handlersLock.RUnlock()
 
+		var defaultHandler bool
+
 		if !ok {
 			if s.defaultHandler == nil {
 				continue
 			}
 			f = s.defaultHandler
+			defaultHandler = true
 		}
 
 		s.Requests.Add(1)
 		reply := s.getReply()
 		reply.ID = req.ID
-		reply.Data, err = s.call(c, f, req.Data)
+		if defaultHandler {
+			reply.Data, err = s.call(c, f, []byte("{}"))
+		} else {
+			reply.Data, err = s.call(c, f, req.Data)
+		}
 		if err != nil {
 			reply.Data = s.codec.Error(err)
 		}
