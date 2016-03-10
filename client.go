@@ -181,19 +181,19 @@ func (c *Client) listener(s *Server) {
 		}
 
 		s.Requests.Add(1)
-		go func() {
-			reply := s.getReply()
-			reply.ID = req.ID
-			if defaultHandler {
-				reply.Data, err = s.call(c, f, []byte("{}"))
-			} else {
-				reply.Data, err = s.call(c, f, req.Data)
-			}
-			if err != nil {
-				reply.Data = s.codec.Error(err)
-			}
-			s.Requests.Done()
+		reply := s.getReply()
+		reply.ID = req.ID
+		if defaultHandler {
+			reply.Data, err = s.call(c, f, []byte("{}"))
+		} else {
+			reply.Data, err = s.call(c, f, req.Data)
+		}
+		if err != nil {
+			reply.Data = s.codec.Error(err)
+		}
+		s.Requests.Done()
 
+		go func() {
 			bytes, _ := json.Marshal(reply)
 
 			c.Emit(string(bytes))
