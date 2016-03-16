@@ -5,7 +5,9 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -145,6 +147,16 @@ func (c *Client) cleanup(s *Server) {
 
 func (c *Client) listener(s *Server) {
 	tick := time.NewTicker(time.Millisecond * 10)
+	defer func() {
+		if err := recover(); err != nil {
+			buf := make([]byte, 64<<10)
+			buf = buf[:runtime.Stack(buf, false)]
+			println("wsevent: panic serving " + c.Request.RemoteAddr + " ")
+			println(fmt.Sprintf("http: panic serving %s: %v\n%s", c.Request.RemoteAddr, err, buf))
+			c.cleanup(s)
+		}
+	}()
+
 	for {
 		<-tick.C
 		_, data, err := c.conn.ReadMessage()
