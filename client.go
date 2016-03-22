@@ -104,6 +104,7 @@ func (c *Client) EmitJSON(v interface{}) error {
 }
 
 func (c *Client) Close() {
+	atomic.AddInt64(c.server.clients, -1)
 	c.conn.Close()
 }
 
@@ -146,6 +147,8 @@ func (c *Client) cleanup(s *Server) {
 }
 
 func (c *Client) listener(s *Server) {
+	atomic.AddInt64(s.clients, 1)
+
 	tick := time.NewTicker(time.Millisecond * 10)
 	defer func() {
 		if err := recover(); err != nil {

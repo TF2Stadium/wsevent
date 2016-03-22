@@ -78,6 +78,8 @@ type Server struct {
 
 	// Used to wait for all requests to complete
 	Requests *sync.WaitGroup
+
+	clients *int64
 }
 
 func (s *Server) getRequest() *request {
@@ -149,6 +151,7 @@ func NewServer(codec ServerCodec, defaultHandler interface{}) *Server {
 		replyMu: new(sync.Mutex),
 
 		Requests: new(sync.WaitGroup),
+		clients:  new(int64),
 	}
 
 	return s
@@ -318,4 +321,9 @@ func validHandler(method reflect.Value, name string) bool {
 		method.Type().NumOut() == 1 &&
 		method.Type().In(0) == reflect.TypeOf(&Client{}) &&
 		method.Type().In(1).Kind() == reflect.Struct
+}
+
+//Clients return the number of clients connected/added to s
+func (s *Server) Clients() int64 {
+	return atomic.LoadInt64(s.clients)
 }
