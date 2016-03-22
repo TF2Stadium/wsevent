@@ -114,7 +114,7 @@ func (c *Client) cleanup(s *Server) {
 	}
 
 	atomic.StoreInt32(c.closed, 1)
-	c.conn.Close()
+	c.Close()
 
 	s.joinedRoomsMu.RLock()
 	for _, room := range s.joinedRooms[c.ID] {
